@@ -36,8 +36,31 @@ SHORT_CALL = """#DE40 SHORT 📉
 🎯 TP4  24784.6
 """
 
+INDICATOR_2_CALL = """#GOLD SHORT
+
+Вход: 4168
+SL 4180
+
+✅ TP1: 4164
+✅ TP2 : 4160
+✅Take profit 3: 4156
+✅Take profit 4: 4130
+"""
+
 
 class HistoricalSignalTests(unittest.TestCase):
+    def test_parses_indicator_2_text_format_without_image(self):
+        signal = parse_historical_signal(
+            205,
+            INDICATOR_2_CALL,
+            datetime(2026, 8, 5, tzinfo=timezone.utc),
+            has_image=False,
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.symbol, "XAUUSD")
+        self.assertEqual(signal.take_profits, (4164.0, 4160.0, 4156.0, 4130.0))
+        self.assertEqual(signal.indicator, "Индюк 2")
+
     def test_detects_photo_and_image_document(self):
         self.assertTrue(message_has_image(SimpleNamespace(photo=object())))
         self.assertTrue(
@@ -63,6 +86,15 @@ class HistoricalSignalTests(unittest.TestCase):
         self.assertEqual(signal.take_profits, (4007.6, 4010.24, 4012.87, 4015.51))
         self.assertEqual(signal.timestamp_utc.microsecond, 0)
         self.assertEqual(signal.timestamp_moscow.hour, 13)
+
+    def test_extra_targets_do_not_prevent_archiving(self):
+        signal = parse_historical_signal(
+            206,
+            LONG_CALL + "\n🎯 TP5 4018.14\n",
+            datetime(2026, 7, 19, tzinfo=timezone.utc),
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.take_profits, (4007.6, 4010.24, 4012.87, 4015.51))
 
     def test_parses_short_geometry(self):
         signal = parse_historical_signal(

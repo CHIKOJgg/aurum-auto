@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import os
-import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,16 +13,13 @@ from .parser import (
     ENTRY_RE,
     HEADER_RE,
     SL_RE,
+    TP_RE,
     is_supported_symbol,
     normalize_signal_symbol,
 )
 
 
 MOSCOW_TZ = timezone(timedelta(hours=3), "Europe/Moscow")
-TP_RE = re.compile(
-    r"(?im)^\s*🎯?\s*TP\s*(?P<number>[1-4])\s+"
-    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
-)
 
 
 @dataclass(frozen=True)
@@ -119,7 +115,7 @@ def parse_historical_signal(
         int(match.group("number")): _matched_price(match)
         for match in TP_RE.finditer(text)
     }
-    if set(targets) != {1, 2, 3, 4}:
+    if not {1, 2, 3, 4}.issubset(targets):
         return None
 
     entry = _matched_price(entry_match)

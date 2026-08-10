@@ -80,8 +80,46 @@ GERMANY40_CALL = """#Germany40 SHORT 📉
 🎯 TP4  25762.9
 """
 
+INDICATOR_2_COLON_CALL = """#GOLD SHORT
+
+Вход: 4168
+SL 4180
+
+✅ TP1: 4164
+✅ TP2 : 4160
+✅Take profit 3: 4156
+✅Take profit 4: 4130
+"""
+
+INDICATOR_2_PLAIN_CALL = """#GOLD SHORT
+
+Вход 4164.97
+❗️SL 4180
+
+🎯 TP1  4156
+🎯 TP2  4151
+🎯 TP3 4147
+🎯 TP4  4110
+"""
+
 
 class ParserTests(unittest.TestCase):
+    def test_indicator_2_colon_and_take_profit_format(self):
+        signal = parse_signal(117, INDICATOR_2_COLON_CALL)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.symbol, "XAUUSD")
+        self.assertEqual(signal.entry, 4168.0)
+        self.assertEqual(signal.stop_loss, 4180.0)
+        self.assertEqual(signal.take_profits, (4164.0, 4160.0, 4156.0, 4130.0))
+
+    def test_indicator_2_plain_entry_and_exclamation_stop(self):
+        signal = parse_signal(118, INDICATOR_2_PLAIN_CALL)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.symbol, "XAUUSD")
+        self.assertEqual(signal.entry, 4164.97)
+        self.assertEqual(signal.stop_loss, 4180.0)
+        self.assertEqual(signal.take_profits, (4156.0, 4151.0, 4147.0, 4110.0))
+
     def test_real_gold_call_with_all_targets_and_links(self):
         text = """#GOLD SHORT 📉
 
@@ -121,6 +159,102 @@ class ParserTests(unittest.TestCase):
                 signal = parse_signal(115, text, take_profit_target=target)
                 self.assertIsNotNone(signal)
                 self.assertEqual(signal.take_profit, price)
+
+    def test_three_targets_use_the_last_target(self):
+        text = """#GOLD LONG
+
+🔸 Вход сейчас или 4286.75
+🛑 SL 4282.88
+
+🎯 TP1 4290.62
+🎯 TP2 4298.36
+🎯 TP3 4306.10
+"""
+        signal = parse_signal(119, text)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.take_profits, (4290.62, 4298.36, 4306.10))
+        self.assertEqual(signal.take_profit, 4306.10)
+
+    def test_one_take_profit_is_accepted(self):
+        text = """#GOLD LONG
+
+Вход 4341
+SL 4320
+
+✅Take profit 1: 4344
+"""
+        signal = parse_signal(122, text)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.take_profits, (4344.0,))
+        self.assertEqual(signal.take_profit, 4344.0)
+
+    def test_two_mixed_take_profit_names_are_accepted(self):
+        text = """#GOLD LONG
+
+Вход 4341
+SL 4320
+
+✅ TP1: 4344
+✅Take profit 2: 4349
+"""
+        signal = parse_signal(123, text)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.take_profits, (4344.0, 4349.0))
+        self.assertEqual(signal.take_profit, 4349.0)
+
+    def test_hundreds_of_mixed_targets_are_retained(self):
+        targets = "\n".join(
+            f"{'TP' if number % 2 else 'Take profit '} {number}: {4341 + number}"
+            for number in range(1, 201)
+        )
+        text = f"""#GOLD LONG
+
+Вход 4341
+SL 4320
+
+{targets}
+"""
+        signal = parse_signal(124, text, take_profit_target=4)
+        self.assertIsNotNone(signal)
+        self.assertEqual(len(signal.take_profits), 200)
+        self.assertEqual(signal.take_profits[0], 4342.0)
+        self.assertEqual(signal.take_profits[-1], 4541.0)
+        self.assertEqual(signal.take_profit, 4345.0)
+
+    def test_any_number_of_targets_keeps_tp2_tp4_strategy_levels(self):
+        text = """#GOLD LONG 📈
+
+🔸 Повторный вход сейчас или 4320.37
+🛑 SL 4316.32
+
+🎯 TP1  4324.43
+🎯 TP2  4328.48
+🎯 TP3  4332.53
+🎯 TP4  4336.58
+🎯 TP5  4340.64
+"""
+        signal = parse_signal(120, text, take_profit_target=4)
+        self.assertIsNotNone(signal)
+        self.assertEqual(
+            signal.take_profits,
+            (4324.43, 4328.48, 4332.53, 4336.58, 4340.64),
+        )
+        self.assertEqual(signal.take_profit, 4336.58)
+
+    def test_entry_now_without_repeat_or_ili_is_parsed(self):
+        text = """#GOLD LONG
+
+🔸 Вход сейчас 4320.37
+🛑 SL 4316.32
+
+🎯 TP1 4324.43
+🎯 TP2 4328.48
+🎯 TP3 4332.53
+🎯 TP4 4336.58
+"""
+        signal = parse_signal(121, text)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.entry, 4320.37)
 
     def test_invalid_take_profit_target_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "from 1 to 4"):

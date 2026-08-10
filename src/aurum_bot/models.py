@@ -24,7 +24,7 @@ class Signal:
     entry: float
     stop_loss: float
     take_profit: float
-    take_profits: tuple[float, float, float, float] | None = None
+    take_profits: tuple[float, ...] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)

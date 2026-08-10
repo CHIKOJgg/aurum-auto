@@ -158,6 +158,8 @@ def _manage_plan(mt5: Any, path: Path, plan: dict[str, Any], deviation: int) -> 
     if strategy.dynamic_tp2_minutes is not None and touched >= 2:
         elapsed = (now_msc - int(plan["entry_time_msc"])) / 60_000
         selected = strategy.dynamic_fast_target if elapsed <= strategy.dynamic_tp2_minutes else strategy.dynamic_slow_target
+        # A three-target call has no TP4 to promote to.
+        selected = min(selected, len(levels))
         plan["final_target"] = selected
         target_tp = levels[selected - 1]
         if touched >= selected:

@@ -18,13 +18,16 @@ HEADER_RE = re.compile(
     r"(?im)^\s*#(?P<symbol>[A-Z0-9._-]+)\s+(?P<direction>LONG|SHORT)\b"
 )
 ENTRY_RE = re.compile(
-    r"(?im)^\s*🔸?\s*Вход\s+сейчас\s+или\s+(?P<price>\d+(?:[.,]\d+)?)\s*$"
+    r"(?im)^\s*[^\w\s]*\s*(?:\w+\s+)?Вход"
+    r"(?:\s+сейчас(?:\s+или)?)?\s*:?\s*"
+    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 SL_RE = re.compile(
-    r"(?im)^\s*🛑?\s*SL\s+(?P<price>\d+(?:[.,]\d+)?)\s*$"
+    r"(?im)^\s*[^\w\s]*\s*SL\s*:?\s*(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 TP_RE = re.compile(
-    r"(?im)^\s*(?:\S+\s*)?TP\s*(?P<number>[1-4])\s+"
+    r"(?im)^\s*[^\w\s]*\s*(?:TP\s*|Take\s+profit\s*)"
+    r"(?P<number>\d+)\s*:?\s*"
     r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 
@@ -61,7 +64,12 @@ def parse_signal(
     take_profits = {
         int(match.group("number")): _price(match) for match in TP_RE.finditer(text)
     }
-    tp_match = take_profits.get(take_profit_target)
+    target_count = max(take_profits, default=0)
+    # Calls with fewer than four targets exit at their final supplied target.
+    # Extra targets are retained, but strategies that refer to TP1--TP4 keep
+    # using those exact numbered levels.
+    selected_target = target_count if target_count < 4 else take_profit_target
+    tp_match = take_profits.get(selected_target)
     if not all((header, entry_match, sl_match, tp_match)):
         return None
 
@@ -90,8 +98,8 @@ def parse_signal(
         stop_loss=stop_loss,
         take_profit=take_profit,
         take_profits=(
-            tuple(float(take_profits[number]) for number in range(1, 5))
-            if all(number in take_profits for number in range(1, 5))
+            tuple(float(take_profits[number]) for number in range(1, target_count + 1))
+            if all(number in take_profits for number in range(1, target_count + 1))
             else None
         ),
     )

@@ -445,9 +445,13 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         point = float(symbol_info.point)
         entry = _normalized(signal.entry, digits)
         stop_loss = _normalized(signal.stop_loss, digits)
-        if signal.take_profits is None:
-            return ExecutionResult(account.name, "failed", "selected exit strategy requires TP1-TP4")
-        take_profit = _normalized(signal.take_profits[strategy.target_number - 1], digits)
+        if not signal.take_profits:
+            return ExecutionResult(account.name, "failed", "signal has no take-profit levels")
+        target_count = len(signal.take_profits)
+        initial_target = (
+            target_count if target_count < 4 else strategy.target_number
+        )
+        take_profit = _normalized(signal.take_profits[initial_target - 1], digits)
 
         order_side = (
             mt5.ORDER_TYPE_BUY
@@ -565,6 +569,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         )
         if execution_kind is ExecutionKind.MARKET and strategy.target_by_order_kind is not None:
             market_target, _ = strategy.target_by_order_kind
+            market_target = min(market_target, target_count)
             market_tp = _normalized(signal.take_profits[market_target - 1], digits)
             market_target_ahead = (
                 executable_price < market_tp
@@ -579,13 +584,11 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             symbol=signal.symbol,
             published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
         )
+        target_number = min(target_number, target_count)
         take_profit = _normalized(signal.take_profits[target_number - 1], digits)
-        exit_legs = executable_legs(
-            strategy,
-            total_volume=volume,
-            volume_min=float(symbol_info.volume_min),
-            volume_step=max(float(symbol_info.volume_step), float(trading["lot_step"])),
-            target_number=target_number,
+        exit_legs = [(target_number, volume)] if target_count < 4 else executable_legs(
+            strategy, total_volume=volume, volume_min=float(symbol_info.volume_min),
+            volume_step=max(float(symbol_info.volume_step), float(trading["lot_step"])), target_number=target_number,
         )
         comment = f"AURUM:{signal.message_id}"
         if execution_kind is ExecutionKind.MARKET:
@@ -701,13 +704,11 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         symbol=signal.symbol,
                         published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
                     )
+                    target_number = min(target_number, target_count)
                     take_profit = _normalized(signal.take_profits[target_number - 1], digits)
-                    exit_legs = executable_legs(
-                        strategy,
-                        total_volume=volume,
-                        volume_min=float(symbol_info.volume_min),
-                        volume_step=max(float(symbol_info.volume_step), float(trading["lot_step"])),
-                        target_number=target_number,
+                    exit_legs = [(target_number, volume)] if target_count < 4 else executable_legs(
+                        strategy, total_volume=volume, volume_min=float(symbol_info.volume_min),
+                        volume_step=max(float(symbol_info.volume_step), float(trading["lot_step"])), target_number=target_number,
                     )
                     market_price = _normalized(refreshed_price, digits)
                     protected_geometry = (
