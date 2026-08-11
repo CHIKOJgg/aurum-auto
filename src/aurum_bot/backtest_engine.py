@@ -577,6 +577,7 @@ def _entry_kind(
     min_market_risk_ratio: float,
     max_market_risk_ratio: float,
     strict_call_entry: bool = False,
+    market_entry_tolerance_r: float = 0.0,
 ) -> str:
     if strict_call_entry:
         if signal.direction is Direction.LONG:
@@ -589,7 +590,8 @@ def _entry_kind(
         risk_ratio = abs(executable_price - signal.stop_loss) / abs(
             signal.entry - signal.stop_loss
         )
-        if min_market_risk_ratio <= risk_ratio <= max_market_risk_ratio:
+        if (min_market_risk_ratio <= risk_ratio <= max_market_risk_ratio
+                or abs(executable_price - signal.entry) <= market_entry_tolerance_r * abs(signal.entry - signal.stop_loss) + 1e-9):
             return "market"
         return "limit" if signal.entry < executable_price else "stop"
 
@@ -598,7 +600,8 @@ def _entry_kind(
     risk_ratio = abs(signal.stop_loss - executable_price) / abs(
         signal.stop_loss - signal.entry
     )
-    if min_market_risk_ratio <= risk_ratio <= max_market_risk_ratio:
+    if (min_market_risk_ratio <= risk_ratio <= max_market_risk_ratio
+            or abs(executable_price - signal.entry) <= market_entry_tolerance_r * abs(signal.entry - signal.stop_loss) + 1e-9):
         return "market"
     return "limit" if signal.entry > executable_price else "stop"
 
@@ -615,6 +618,7 @@ def simulate_strategy(
     max_entry_delay_seconds: float = 60,
     execution_delay_seconds: float = 0.4,
     strict_call_entry: bool = False,
+    market_entry_tolerance_r: float = 0.0,
 ) -> list[BacktestRecord]:
     ordered = sorted(signals, key=lambda item: (item.timestamp_utc, item.message_id))
     records: list[BacktestRecord] = []
@@ -683,6 +687,7 @@ def simulate_strategy(
             min_market_risk_ratio,
             max_market_risk_ratio,
             strict_call_entry,
+            market_entry_tolerance_r,
         )
         record.order_kind = kind
         if kind == "market":
@@ -726,6 +731,7 @@ def simulate_independent_strategy(
     max_entry_delay_seconds: float = 60,
     execution_delay_seconds: float = 0.4,
     strict_call_entry: bool = False,
+    market_entry_tolerance_r: float = 0.0,
 ) -> list[BacktestRecord]:
     """Backtest every signal independently from entry until its first exit."""
     ordered = sorted(signals, key=lambda item: (item.timestamp_utc, item.message_id))
@@ -770,6 +776,7 @@ def simulate_independent_strategy(
             min_market_risk_ratio,
             max_market_risk_ratio,
             strict_call_entry,
+            market_entry_tolerance_r,
         )
 
         if kind == "market":

@@ -40,6 +40,14 @@ class StateTests(unittest.TestCase):
             test_channel.load()
             self.assertEqual(test_channel.last_seen_message_id, 20)
 
+    def test_unfinished_messages_only_returns_recoverable_statuses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = StateStore(Path(directory) / "state.json", 1)
+            state.mark(1, "claimed")
+            state.mark(2, "executing", signal={"symbol": "XAUUSD"})
+            state.mark(3, "completed")
+            self.assertEqual([item[0] for item in state.unfinished_messages()], [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

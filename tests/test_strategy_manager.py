@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from aurum_bot.strategy_manager import manage
+from aurum_bot.strategy_manager import _favorable_extreme, manage
 
 
 class FakeMt5:
@@ -131,6 +131,19 @@ class PendingTimeoutTests(unittest.TestCase):
         self.assertEqual(fake.requests, [])
         plan = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(plan["status"], "active")
+
+    def test_favorable_extreme_uses_configured_server_offset(self):
+        class TickMt5:
+            COPY_TICKS_ALL = 1
+            def __init__(self): self.window = None
+            def symbol_info_tick(self, symbol): return SimpleNamespace(bid=100, ask=101)
+            def copy_ticks_range(self, symbol, start, end, flags):
+                self.window = (start, end)
+                return None
+        mt5 = TickMt5()
+        _favorable_extreme(mt5, {"symbol": "GOLD", "direction": "LONG", "entry_time_msc": 1_000}, 2_000, 3)
+        self.assertEqual((mt5.window[0] - mt5.window[1]).total_seconds(), -2)
+        self.assertEqual(mt5.window[1].hour, 3)
 
 
 if __name__ == "__main__":

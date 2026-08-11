@@ -408,6 +408,8 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             )
 
         if (
+            not bool(payload.get("reconcile", False))
+            and
             float(trading.get("news_window_before_minutes", 0.0)) > 0
             or float(trading.get("news_window_after_minutes", 0.0)) > 0
         ):
@@ -446,6 +448,15 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "failed",
                 f"no symbol/tick data for {broker_symbol}: {mt5.last_error()}",
             )
+        # This check intentionally precedes spread/news guards and netting
+        # preparation. A restarted process must never close/cancel a live
+        # AURUM order before recognizing its own earlier successful attempt.
+        comment = f"AURUM:{signal.message_id}"
+        for item in tuple(mt5.positions_get(symbol=broker_symbol) or ()) + tuple(mt5.orders_get(symbol=broker_symbol) or ()):
+            if int(getattr(item, "magic", -1)) == magic and str(getattr(item, "comment", "")).startswith(comment[:20]):
+                return ExecutionResult(
+                    account.name, "executed", "executed_existing", ticket=int(item.ticket)
+                )
         max_spread_points = int(trading.get("max_spread_points", 0))
         if not spread_allowed(
             float(tick.ask),

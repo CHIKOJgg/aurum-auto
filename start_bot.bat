@@ -40,7 +40,6 @@ echo Starting Aurum Research Club - MT5 bot...
 echo Press Ctrl+C twice quickly to stop.
 echo.
 
-:restart
 "%PYTHON_EXE%" -m aurum_bot.main --config "%CONFIG_FILE%"
 set "BOT_EXIT_CODE=%ERRORLEVEL%"
 
@@ -52,9 +51,9 @@ if "%BOT_EXIT_CODE%"=="0" (
 
 echo.
 echo [WARN] Bot exited with code %BOT_EXIT_CODE%.
-echo Restarting in 10 seconds... Press Ctrl+C to abort.
-timeout /t 10 /nobreak >nul
-goto :restart
+echo [ERROR] Bot was not restarted automatically to prevent an unsafe crash loop.
+echo Review logs\aurum_bot.log, fix the cause, then start it manually.
+goto :end
 
 :end
 

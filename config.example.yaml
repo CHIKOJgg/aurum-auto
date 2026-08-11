@@ -5,6 +5,7 @@ telegram:
   # Kept for backward-compatible config loading; NewMessage events do not poll.
   poll_interval_seconds: 20
   session_file: "runtime/telegram_user"
+  notifications_enabled: true
 
 trading:
   risk_percent: 1.0
@@ -26,6 +27,8 @@ trading:
   pending_timeout_minutes: 15
   # Skip entry when the current spread exceeds this many points. 0 = disabled.
   max_spread_points: 50
+  mt5_server_offset_hours: 3
+  close_spread_hard_cap_minutes: 10
   # Skip entries inside news windows. Events are listed in news_events_file
   # as [{start_utc: "YYYY-MM-DDTHH:MM", title: "..."}]; windows before/after in
   # minutes. Both windows 0 = news filter disabled.

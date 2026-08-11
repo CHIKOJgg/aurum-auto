@@ -90,7 +90,7 @@ def _cancel_order(mt5: Any, order: Any) -> bool:
     return int(result.retcode) in accepted
 
 
-def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int) -> float | None:
+def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offset_hours: float = 3.0) -> float | None:
     tick = mt5.symbol_info_tick(plan["symbol"])
     if tick is None:
         return None
@@ -100,10 +100,14 @@ def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int) -> float | 
     if not start_msc:
         return current
     try:
+        # MT5 copy_ticks_range interprets naive server timestamps.  Keep the
+        # conversion aligned with the backtest collector, then compare returned
+        # prices only (their timestamps are not persisted here).
+        offset_seconds = float(server_offset_hours) * 3_600
         ticks = mt5.copy_ticks_range(
             plan["symbol"],
-            datetime.fromtimestamp(max(0, int(start_msc) - 1000) / 1000, timezone.utc),
-            datetime.fromtimestamp(now_msc / 1000, timezone.utc),
+            datetime.fromtimestamp(max(0, int(start_msc) - 1000) / 1000 + offset_seconds, timezone.utc),
+            datetime.fromtimestamp(now_msc / 1000 + offset_seconds, timezone.utc),
             mt5.COPY_TICKS_ALL,
         )
         if ticks is None or len(ticks) == 0:
@@ -120,6 +124,9 @@ def _manage_plan(
     plan: dict[str, Any],
     deviation: int,
     pending_timeout_minutes: float = 0.0,
+    max_spread_points: int = 0,
+    server_offset_hours: float = 3.0,
+    close_spread_hard_cap_minutes: float = 10.0,
 ) -> None:
     if plan.get("status") != "active":
         return
@@ -138,12 +145,32 @@ def _manage_plan(
                         _cancel_order(mt5, order)
                 remaining = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
                 if not remaining:
+                    # An order may fill while cancellation is in flight.  Re-read
+                    # positions before declaring the plan complete, otherwise a
+                    # newly filled position would be left unmanaged.
+                    if _matching(list(mt5.positions_get(symbol=symbol) or ()), plan):
+                        return _manage_plan(
+                            mt5, path, plan, deviation, pending_timeout_minutes,
+                            max_spread_points, server_offset_hours,
+                            close_spread_hard_cap_minutes,
+                        )
                     plan["status"] = "completed"
                     plan["completion_reason"] = "pending_timeout"
                     _save(path, plan)
                     return
             return
+        direction = Direction(plan["direction"])
+        tick = mt5.symbol_info_tick(symbol)
+        stop = float(plan.get("stop_loss", 0.0))
+        current = float(tick.bid if direction is Direction.LONG else tick.ask) if tick else None
+        if int(plan.get("touched_target", 0)) >= 1:
+            reason = "broker_closed_tp"
+        elif current is not None and (current <= stop if direction is Direction.LONG else current >= stop):
+            reason = "broker_closed_sl"
+        else:
+            reason = "broker_closed_manual"
         plan["status"] = "completed"
+        plan["completion_reason"] = reason
         plan["completed_at"] = datetime.now(timezone.utc).isoformat()
         _save(path, plan)
         return
@@ -153,7 +180,7 @@ def _manage_plan(
         plan["entry_time_msc"] = int(getattr(position, "time_msc", int(position.time) * 1000))
         plan["entry_price"] = float(position.price_open)
     now_msc = time.time_ns() // 1_000_000
-    extreme = _favorable_extreme(mt5, plan, now_msc)
+    extreme = _favorable_extreme(mt5, plan, now_msc, server_offset_hours)
     if extreme is None:
         return
     direction = Direction(plan["direction"])
@@ -169,6 +196,18 @@ def _manage_plan(
     if symbol_info is None:
         return
 
+    def close_allowed() -> bool:
+        if max_spread_points <= 0:
+            return True
+        tick = mt5.symbol_info_tick(symbol)
+        spread = float(tick.ask) - float(tick.bid) if tick else float("inf")
+        limit = max_spread_points * float(symbol_info.point)
+        if spread <= limit + 1e-12:
+            plan.pop("close_deferred_since_msc", None)
+            return True
+        since = int(plan.setdefault("close_deferred_since_msc", now_msc))
+        return now_msc - since >= int(close_spread_hard_cap_minutes * 60_000)
+
     # The last leg remains protected by native MT5 TP. Earlier executable legs
     # are closed once their target has traded; volume rounding was fixed at entry.
     open_volume = sum(float(item.volume) for item in positions)
@@ -176,6 +215,8 @@ def _manage_plan(
         if leg.get("closed") or int(leg["target"]) >= int(plan["final_target"]):
             continue
         if touched < int(leg["target"]):
+            continue
+        if not close_allowed():
             continue
         requested = min(float(leg["volume"]), open_volume)
         remaining = requested
@@ -197,7 +238,7 @@ def _manage_plan(
         target_tp = levels[selected - 1]
         if touched >= selected:
             current_positions = _matching(list(mt5.positions_get(symbol=symbol) or ()), plan)
-            if current_positions and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
+            if current_positions and close_allowed() and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
                 plan["status"] = "completed"
                 plan["completion_reason"] = f"dynamic_tp{selected}"
                 _save(path, plan)
@@ -218,7 +259,7 @@ def _manage_plan(
     if strategy.time_exit_minutes is not None:
         due = int(plan["entry_time_msc"]) + int(strategy.time_exit_minutes * 60_000)
         if now_msc >= due and (not strategy.time_exit_if_no_tp1 or touched < 1):
-            if all(_close_position(mt5, item, symbol_info, deviation) for item in positions):
+            if close_allowed() and all(_close_position(mt5, item, symbol_info, deviation) for item in positions):
                 plan["status"] = "completed"
                 plan["completion_reason"] = f"time_exit_{strategy.time_exit_minutes:g}m"
                 _save(path, plan)
@@ -241,7 +282,7 @@ def _manage_plan(
         if current_positions and not stop_is_placeable and stop_target >= 0:
             # The trigger and reversal happened between polls (or while the bot
             # was stopped). Do not leave the wider original risk in place.
-            if all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
+            if close_allowed() and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
                 plan["status"] = "completed"
                 plan["completion_reason"] = "managed_stop_crossed_before_modify"
                 _save(path, plan)
@@ -272,6 +313,9 @@ def manage(payload: dict[str, Any]) -> dict[str, Any]:
                     plan,
                     int(payload["deviation_points"]),
                     float(payload.get("pending_timeout_minutes", 0.0)),
+                    int(payload.get("max_spread_points", 0)),
+                    float(payload.get("mt5_server_offset_hours", 3.0)),
+                    float(payload.get("close_spread_hard_cap_minutes", 10.0)),
                 )
                 managed += 1
     finally:

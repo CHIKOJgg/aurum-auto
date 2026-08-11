@@ -17,6 +17,7 @@ def _run_account(
     trading: TradingConfig,
     timing: dict[str, int] | None = None,
     strategy_state_dir: Path | None = None,
+    reconcile: bool = False,
 ) -> ExecutionResult:
     if not account.supports_symbol(signal.symbol):
         return ExecutionResult(
@@ -33,6 +34,8 @@ def _run_account(
         payload["timing"] = timing
     if strategy_state_dir is not None:
         payload["strategy_state_dir"] = str(strategy_state_dir)
+    if reconcile:
+        payload["reconcile"] = True
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "aurum_bot.mt5_worker"],
@@ -67,6 +70,7 @@ def execute_for_accounts(
     trading: TradingConfig,
     timing: dict[str, int] | None = None,
     strategy_state_dir: Path | None = None,
+    reconcile: bool = False,
 ) -> list[ExecutionResult]:
     enabled = [account for account in accounts if account.enabled]
     if not enabled:
@@ -76,7 +80,7 @@ def execute_for_accounts(
     with ThreadPoolExecutor(max_workers=len(enabled)) as pool:
         futures = {
             pool.submit(
-                _run_account, account, signal, trading, timing, strategy_state_dir
+                _run_account, account, signal, trading, timing, strategy_state_dir, reconcile
             ): account.name
             for account in enabled
         }
@@ -99,6 +103,9 @@ def manage_exit_strategies(
             "deviation_points": trading.deviation_points,
             "strategy_state_dir": str(strategy_state_dir),
             "pending_timeout_minutes": trading.pending_timeout_minutes,
+            "max_spread_points": trading.max_spread_points,
+            "mt5_server_offset_hours": trading.mt5_server_offset_hours,
+            "close_spread_hard_cap_minutes": trading.close_spread_hard_cap_minutes,
         }
         try:
             completed = subprocess.run(

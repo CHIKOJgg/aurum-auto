@@ -98,6 +98,14 @@ class StateStore:
         elif not self.path.exists():
             self.save()
 
+    def unfinished_messages(self) -> list[tuple[int, dict[str, Any]]]:
+        """Return durable execution attempts that were interrupted mid-flight."""
+        return [
+            (int(message_id), record)
+            for message_id, record in self.data["messages"].items()
+            if record.get("status") in {"claimed", "executing"}
+        ]
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")

@@ -250,6 +250,14 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(records[0].order_kind, "market")
         self.assertEqual(records[0].entry_price, 100)
 
+    def test_tolerance_allows_market_entry_outside_ratio_band(self):
+        records = simulate_strategy(
+            [signal()], ticks((2, 98.4, 98.5), (3, 105, 106)), STRATEGIES[0],
+            "GOLD", point=0.01, trade_stops_level=0,
+            market_entry_tolerance_r=0.25,
+        )
+        self.assertEqual(records[0].order_kind, "market")
+
     def test_strict_call_entry_keeps_equal_quote_as_pending_stop(self):
         records = simulate_strategy(
             [signal()],

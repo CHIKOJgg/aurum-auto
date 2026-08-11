@@ -11,6 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from typing import Any
 
 from telethon import TelegramClient, events
@@ -53,7 +54,9 @@ def configure_logging(path: Path) -> None:
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    file_handler = logging.FileHandler(path, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        path, maxBytes=1_048_576, backupCount=5, encoding="utf-8"
+    )
     file_handler.setFormatter(formatter)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
@@ -95,6 +98,7 @@ async def handle_message(
     received_at_ms: int | None = None,
     received_monotonic_ns: int | None = None,
     mt5_lock: asyncio.Lock | None = None,
+    notification_queue: asyncio.Queue[str] | None = None,
 ) -> None:
     received_at_ms = received_at_ms or time.time_ns() // 1_000_000
     received_monotonic_ns = received_monotonic_ns or time.monotonic_ns()
@@ -250,6 +254,36 @@ async def handle_message(
                     recorded_at=datetime.now().astimezone(),
                 )
             )
+    if notification_queue is not None:
+        for result in results:
+            notification_queue.put_nowait(_notification_text(message_id, signal, result))
+
+
+def _notification_text(message_id: int, signal: Signal, result: ExecutionResult) -> str:
+    if result.status == "executed":
+        return f"♻️ {message_id} {signal.symbol} {signal.direction.value} executed lot={result.volume:g}" if result.volume is not None else f"♻️ {message_id} {signal.symbol} {signal.direction.value} executed"
+    if result.status.startswith("skipped"):
+        return f"⛔ {message_id} {result.status}: {result.detail}"
+    return f"❌ {message_id} {result.status}: {result.detail}"
+
+
+async def _notification_worker(client: TelegramClient, queue: asyncio.Queue[str]) -> None:
+    while True:
+        text = await queue.get()
+        try:
+            for attempt in range(2):
+                try:
+                    await client.send_message("me", text)
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    if attempt:
+                        LOGGER.exception("Telegram notification failed")
+                    else:
+                        LOGGER.warning("Telegram notification failed; retrying once")
+        finally:
+            queue.task_done()
 
 
 async def _journal_write_worker(
@@ -322,8 +356,13 @@ def _any_active_plans(accounts: tuple[AccountConfig, ...], strategy_state_dir: P
         if not account.enabled:
             continue
         path = strategy_state_dir / account.name
-        if path.is_dir() and any(path.glob("*.json")):
-            return True
+        if path.is_dir():
+            for plan_path in path.glob("*.json"):
+                try:
+                    if json.loads(plan_path.read_text(encoding="utf-8")).get("status") == "active":
+                        return True
+                except (OSError, json.JSONDecodeError):
+                    LOGGER.warning("Ignoring unreadable strategy plan: %s", plan_path)
     return False
 
 
@@ -366,19 +405,14 @@ async def run(config: AppConfig) -> None:
                     await asyncio.sleep(10)
                     continue
                 async with mt5_lock:
-                    errors = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            manage_exit_strategies,
-                            config.accounts,
-                            config.trading,
-                            config.paths.strategy_state_dir,
-                        ),
-                        timeout=90,
+                    errors = await asyncio.to_thread(
+                        manage_exit_strategies,
+                        config.accounts,
+                        config.trading,
+                        config.paths.strategy_state_dir,
                     )
                 for error in errors:
                     LOGGER.error("Exit strategy manager: %s", error)
-            except asyncio.TimeoutError:
-                LOGGER.error("Exit strategy manager: timed out (90s), restarting loop")
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -425,7 +459,38 @@ async def run(config: AppConfig) -> None:
         flood_sleep_threshold=60,
     )
     await client.start(phone=config.telegram.phone)
+    notification_queue: asyncio.Queue[str] | None = None
+    notification_task: asyncio.Task[None] | None = None
+    if config.telegram.notifications_enabled:
+        notification_queue = asyncio.Queue()
+        notification_task = asyncio.create_task(_notification_worker(client, notification_queue))
     try:
+        # Re-run only durable, interrupted executions. The MT5 worker uses the
+        # AURUM:<message_id> magic/comment pair to make this idempotent.
+        for message_id, record in state.unfinished_messages():
+            raw_signal = record.get("signal")
+            if not isinstance(raw_signal, dict):
+                state.mark(message_id, "failed", account_results={})
+                LOGGER.error("Cannot reconcile signal %s: state has no signal", message_id)
+                continue
+            try:
+                signal = Signal.from_dict(raw_signal)
+            except (KeyError, TypeError, ValueError) as exc:
+                state.mark(message_id, "failed", account_results={})
+                LOGGER.error("Cannot reconcile signal %s: invalid state signal: %s", message_id, exc)
+                continue
+            async with mt5_lock:
+                results = await asyncio.to_thread(
+                    execute_for_accounts, signal, config.accounts, config.trading,
+                    None, config.paths.strategy_state_dir, True,
+                )
+            result_map = {result.account: result.to_dict() for result in results}
+            status = "completed" if results and all(item.status != "failed" for item in results) else "completed_with_failures"
+            state.mark(message_id, status, signal=signal.to_dict(), account_results=result_map)
+            if notification_queue is not None:
+                for result in results:
+                    notification_queue.put_nowait(_notification_text(message_id, signal, result))
+            LOGGER.info("Reconciled interrupted signal %s: %s", message_id, status)
         channel = await resolve_target_channel(client, config)
         cutoff = await latest_message_id(client, channel)
         state.initialize_cutoff(cutoff)
@@ -474,6 +539,7 @@ async def run(config: AppConfig) -> None:
                         received_at_ms,
                         received_monotonic_ns,
                         mt5_lock,
+                        notification_queue,
                     )
                 except asyncio.CancelledError:
                     raise
@@ -489,6 +555,10 @@ async def run(config: AppConfig) -> None:
             with suppress(asyncio.CancelledError):
                 await consumer
     finally:
+        if notification_task is not None:
+            notification_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await notification_task
         for task in journal_tasks:
             task.cancel()
         for task in journal_tasks:

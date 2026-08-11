@@ -452,6 +452,7 @@ def run_backtest(
                         ),
                         execution_delay_seconds=0.4,
                         strict_call_entry=trading.strict_call_entry,
+                        market_entry_tolerance_r=trading.market_entry_tolerance_r,
                     )
                     for record in records:
                         if not used_fallback:

@@ -20,6 +20,7 @@ class TelegramConfig:
     channel_title: str
     poll_interval_seconds: int
     session_file: Path
+    notifications_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,8 @@ class TradingConfig:
     news_events_file: str = ""
     news_window_before_minutes: float = 0.0
     news_window_after_minutes: float = 0.0
+    mt5_server_offset_hours: float = 3.0
+    close_spread_hard_cap_minutes: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         channel_title=str(telegram_raw["channel_title"]),
         poll_interval_seconds=max(20, int(telegram_raw["poll_interval_seconds"])),
         session_file=_resolve(root, str(telegram_raw["session_file"])),
+        notifications_enabled=bool(telegram_raw.get("notifications_enabled", True)),
     )
     trading = TradingConfig(
         risk_percent=float(trading_raw.get("risk_percent", 1.0)),
@@ -177,9 +181,13 @@ def load_config(config_path: str | Path) -> AppConfig:
         news_window_after_minutes=float(
             trading_raw.get("news_window_after_minutes", 0.0)
         ),
+        mt5_server_offset_hours=float(trading_raw.get("mt5_server_offset_hours", 3.0)),
+        close_spread_hard_cap_minutes=float(
+            trading_raw.get("close_spread_hard_cap_minutes", 10.0)
+        ),
     )
-    if trading.risk_percent != 2.0:
-        raise ValueError("This strategy is locked to the agreed nominal risk_percent: 2.0")
+    if trading.risk_percent != 1.0:
+        raise ValueError("This strategy is locked to risk_percent: 1.0")
     if trading.min_market_risk_percent != 0.9:
         raise ValueError(
             "This strategy is locked to the agreed min_market_risk_percent: 0.9"
@@ -200,6 +208,8 @@ def load_config(config_path: str | Path) -> AppConfig:
         raise ValueError("trading.news_window_before_minutes must be >= 0")
     if trading.news_window_after_minutes < 0:
         raise ValueError("trading.news_window_after_minutes must be >= 0")
+    if trading.close_spread_hard_cap_minutes < 0:
+        raise ValueError("trading.close_spread_hard_cap_minutes must be >= 0")
     if trading.take_profit_target not in {1, 2, 3, 4}:
         raise ValueError("trading.take_profit_target must be an integer from 1 to 4")
     get_strategy(trading.exit_strategy)
