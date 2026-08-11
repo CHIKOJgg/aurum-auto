@@ -36,6 +36,12 @@ class TradingConfig:
     exit_strategy: str = "sl_tp2"
     strict_call_entry: bool = True
     enable_indicator_2: bool = False
+    market_entry_tolerance_r: float = 0.0
+    pending_timeout_minutes: float = 0.0
+    max_spread_points: int = 0
+    news_events_file: str = ""
+    news_window_before_minutes: float = 0.0
+    news_window_after_minutes: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -155,9 +161,25 @@ def load_config(config_path: str | Path) -> AppConfig:
         ).strip(),
         strict_call_entry=bool(trading_raw.get("strict_call_entry", True)),
         enable_indicator_2=bool(trading_raw.get("enable_indicator_2", False)),
+        market_entry_tolerance_r=float(
+            trading_raw.get("market_entry_tolerance_r", 0.0)
+        ),
+        pending_timeout_minutes=float(
+            trading_raw.get("pending_timeout_minutes", 0.0)
+        ),
+        max_spread_points=int(trading_raw.get("max_spread_points", 0)),
+        news_events_file=str(
+            trading_raw.get("news_events_file", "runtime/news_events.json")
+        ).strip(),
+        news_window_before_minutes=float(
+            trading_raw.get("news_window_before_minutes", 0.0)
+        ),
+        news_window_after_minutes=float(
+            trading_raw.get("news_window_after_minutes", 0.0)
+        ),
     )
-    if trading.risk_percent != 1.0:
-        raise ValueError("This strategy is locked to the agreed nominal risk_percent: 1.0")
+    if trading.risk_percent != 2.0:
+        raise ValueError("This strategy is locked to the agreed nominal risk_percent: 2.0")
     if trading.min_market_risk_percent != 0.9:
         raise ValueError(
             "This strategy is locked to the agreed min_market_risk_percent: 0.9"
@@ -168,6 +190,16 @@ def load_config(config_path: str | Path) -> AppConfig:
         )
     if trading.lot_step != 0.01:
         raise ValueError("This strategy is locked to the agreed lot_step: 0.01")
+    if trading.market_entry_tolerance_r < 0:
+        raise ValueError("trading.market_entry_tolerance_r must be >= 0")
+    if trading.pending_timeout_minutes < 0:
+        raise ValueError("trading.pending_timeout_minutes must be >= 0")
+    if trading.max_spread_points < 0:
+        raise ValueError("trading.max_spread_points must be >= 0")
+    if trading.news_window_before_minutes < 0:
+        raise ValueError("trading.news_window_before_minutes must be >= 0")
+    if trading.news_window_after_minutes < 0:
+        raise ValueError("trading.news_window_after_minutes must be >= 0")
     if trading.take_profit_target not in {1, 2, 3, 4}:
         raise ValueError("trading.take_profit_target must be an integer from 1 to 4")
     get_strategy(trading.exit_strategy)

@@ -34,6 +34,7 @@ def choose_execution(
     minimum_distance: float,
     market_risk_in_range: bool = False,
     strict_call_entry: bool = False,
+    market_entry_tolerance_r: float = 0.0,
 ) -> ExecutionKind:
     """
     Decide using the executable side of the spread (ask for LONG, bid for SHORT).
@@ -42,20 +43,33 @@ def choose_execution(
     Otherwise, use market throughout the inclusive 0.9R-1.1R stop-risk range, including
     a quote exactly at the call entry (1R). Outside that range use a limit.
     A quote at/past SL is also outside the market-entry range and uses a limit.
+
+    market_entry_tolerance_r additionally allows market entry when the quote is
+    within this fraction of the stop distance (R) from the call entry, covering
+    lot rounding overshoot and small adverse drift. The quote must never be
+    at/past the stop loss.
     """
     if strict_call_entry:
         return ExecutionKind.LIMIT
 
+    stop_distance = abs(entry - stop_loss)
+    price_within_tolerance = (
+        market_entry_tolerance_r > 0
+        and stop_distance > 0
+        and abs(executable_price - entry)
+        <= market_entry_tolerance_r * stop_distance + 1e-9
+    )
+
     if direction is Direction.LONG:
         if executable_price <= stop_loss:
             return ExecutionKind.LIMIT
-        if market_risk_in_range:
+        if market_risk_in_range or price_within_tolerance:
             return ExecutionKind.MARKET
         return ExecutionKind.LIMIT
 
     if executable_price >= stop_loss:
         return ExecutionKind.LIMIT
-    if market_risk_in_range:
+    if market_risk_in_range or price_within_tolerance:
         return ExecutionKind.MARKET
     return ExecutionKind.LIMIT
 

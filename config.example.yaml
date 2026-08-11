@@ -17,6 +17,21 @@ trading:
   # Enter at market only while stop risk is within the inclusive 0.9R-1.1R range.
   min_market_risk_percent: 0.9
   max_market_risk_percent: 1.1
+  # Also enter at market when the quote is within this fraction of the stop
+  # distance (R) from the call entry, even if risk slightly exceeds the band
+  # (e.g. after lot rounding). 0 = disabled.
+  market_entry_tolerance_r: 0.25
+  # Cancel a pending order that has not been filled within this many minutes
+  # after placement. 0 = keep pending orders forever.
+  pending_timeout_minutes: 15
+  # Skip entry when the current spread exceeds this many points. 0 = disabled.
+  max_spread_points: 50
+  # Skip entries inside news windows. Events are listed in news_events_file
+  # as [{start_utc: "YYYY-MM-DDTHH:MM", title: "..."}]; windows before/after in
+  # minutes. Both windows 0 = news filter disabled.
+  news_events_file: "runtime/news_events.json"
+  news_window_before_minutes: 10
+  news_window_after_minutes: 15
   # Round to the nearest hundredth and never request less than 0.01 lot.
   lot_step: 0.01
   deviation_points: 20

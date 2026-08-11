@@ -68,6 +68,7 @@ STRATEGIES = (
     StrategySpec("tp2_50_tp4_50_be_after_tp2", "50% TP2 + 50% TP4, остаток в Б/У", 4, (0, .5, 0, .5), stop_moves=((2, 0),)),
     StrategySpec("tp1_25_tp2_25_tp4_50_stair", "25% TP1 + 25% TP2 + 50% TP4 с лесенкой", 4, (.25, .25, 0, .5), stop_moves=((1, 0), (2, 1))),
     StrategySpec("tp1_50_tp4_50_be_after_tp1", "50% TP1 + 50% TP4, остаток в Б/У", 4, (.5, 0, 0, .5), stop_moves=((1, 0),)),
+    StrategySpec("tp1_50_tp4_50_staircase", "50% TP1 + 50% TP4 с лесенкой: TP1→Б/У, TP2→TP1", 4, (.5, 0, 0, .5), stop_moves=((1, 0), (2, 1))),
     StrategySpec("tp2_33_tp4_67_lock_tp1", "33% TP2 + 67% TP4, остаток защищён TP1", 4, (0, .33, 0, .67), stop_moves=((2, 1),)),
     StrategySpec("dynamic_tp3_tp4_be", "Быстрый TP2 → TP4, медленный → TP3; SL в Б/У", 4, stop_moves=((2, 0),), dynamic_tp2_minutes=30),
     StrategySpec("tp4_time_be_15m", "TP4, через 15 минут в прибыли → Б/У", 4, timed_breakeven_minutes=15),

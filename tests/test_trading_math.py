@@ -111,6 +111,100 @@ class ExecutionDecisionTests(unittest.TestCase):
             ExecutionKind.LIMIT,
         )
 
+    def test_tolerance_enters_market_on_small_adverse_drift(self):
+        self.assertEqual(
+            choose_execution(
+                Direction.LONG,
+                100,
+                90,
+                100.5,
+                0.1,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.MARKET,
+        )
+        self.assertEqual(
+            choose_execution(
+                Direction.SHORT,
+                100,
+                110,
+                99.5,
+                0.1,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.MARKET,
+        )
+
+    def test_tolerance_does_not_fire_on_large_drift(self):
+        self.assertEqual(
+            choose_execution(
+                Direction.LONG,
+                100,
+                90,
+                103.0,
+                0.5,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.LIMIT,
+        )
+        self.assertEqual(
+            choose_execution(
+                Direction.SHORT,
+                100,
+                110,
+                97.0,
+                0.5,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.LIMIT,
+        )
+
+    def test_tolerance_does_not_fire_far_within_stop_geometry(self):
+        self.assertEqual(
+            choose_execution(
+                Direction.LONG,
+                100,
+                90,
+                91,
+                0.1,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.LIMIT,
+        )
+
+    def test_zero_tolerance_keeps_legacy_behavior(self):
+        self.assertEqual(
+            choose_execution(Direction.LONG, 100, 90, 100.5, 0.1),
+            ExecutionKind.LIMIT,
+        )
+        self.assertEqual(
+            choose_execution(
+                Direction.LONG,
+                100,
+                90,
+                99.5,
+                0.1,
+                market_risk_in_range=True,
+                market_entry_tolerance_r=0.0,
+            ),
+            ExecutionKind.MARKET,
+        )
+
+    def test_strict_call_entry_ignores_tolerance(self):
+        self.assertEqual(
+            choose_execution(
+                Direction.LONG,
+                100,
+                90,
+                100.5,
+                0.1,
+                market_risk_in_range=True,
+                strict_call_entry=True,
+                market_entry_tolerance_r=0.25,
+            ),
+            ExecutionKind.LIMIT,
+        )
+
 
 class VolumeTests(unittest.TestCase):
     def test_raw_volume_is_not_rounded(self):

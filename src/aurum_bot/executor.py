@@ -98,15 +98,25 @@ def manage_exit_strategies(
             "account": account.to_dict(),
             "deviation_points": trading.deviation_points,
             "strategy_state_dir": str(strategy_state_dir),
+            "pending_timeout_minutes": trading.pending_timeout_minutes,
         }
-        completed = subprocess.run(
-            [sys.executable, "-m", "aurum_bot.strategy_manager"],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            timeout=75,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "aurum_bot.strategy_manager"],
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                timeout=75,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(f"{account.name}: strategy_manager timed out after 75s")
+            continue
         if completed.returncode != 0:
-            errors.append(f"{account.name}: {(completed.stderr or completed.stdout).strip()}")
+            detail = (completed.stderr or completed.stdout).strip()
+            errors.append(
+                f"{account.name}: exit_code={completed.returncode} "
+                f"detail={detail or '<empty>'} "
+                f"stdout={completed.stdout.strip()[:200] or '<empty>'}"
+            )
     return errors

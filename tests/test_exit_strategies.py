@@ -10,8 +10,8 @@ from aurum_bot.exit_strategies import (
 
 class ExitStrategyTests(unittest.TestCase):
     def test_all_strategy_keys_are_unique(self):
-        self.assertEqual(len(STRATEGIES), 40)
-        self.assertEqual(len({item.key for item in STRATEGIES}), 40)
+        self.assertEqual(len(STRATEGIES), 41)
+        self.assertEqual(len({item.key for item in STRATEGIES}), 41)
 
     def test_market_pending_strategy_selects_target_from_execution(self):
         strategy = get_strategy("market_tp2_pending_tp4")

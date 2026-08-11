@@ -75,6 +75,21 @@ def _modify_position(mt5: Any, position: Any, *, stop: float, take_profit: float
     return result is not None and int(result.retcode) in _success_codes(mt5)
 
 
+def _cancel_order(mt5: Any, order: Any) -> bool:
+    result = mt5.order_send({
+        "action": mt5.TRADE_ACTION_REMOVE,
+        "order": int(order.ticket),
+    })
+    if result is None:
+        return False
+    accepted = {
+        mt5.TRADE_RETCODE_DONE,
+        mt5.TRADE_RETCODE_DONE_PARTIAL,
+        int(getattr(mt5, "TRADE_RETCODE_ORDER_REMOVED", 4108)),
+    }
+    return int(result.retcode) in accepted
+
+
 def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int) -> float | None:
     tick = mt5.symbol_info_tick(plan["symbol"])
     if tick is None:
@@ -99,7 +114,13 @@ def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int) -> float | 
         return current
 
 
-def _manage_plan(mt5: Any, path: Path, plan: dict[str, Any], deviation: int) -> None:
+def _manage_plan(
+    mt5: Any,
+    path: Path,
+    plan: dict[str, Any],
+    deviation: int,
+    pending_timeout_minutes: float = 0.0,
+) -> None:
     if plan.get("status") != "active":
         return
     symbol = str(plan["symbol"])
@@ -107,6 +128,20 @@ def _manage_plan(mt5: Any, path: Path, plan: dict[str, Any], deviation: int) -> 
     orders = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
     if not positions:
         if orders:
+            if pending_timeout_minutes > 0:
+                now_msc = time.time_ns() // 1_000_000
+                for order in orders:
+                    placed_msc = int(getattr(order, "time_setup_msc", 0) or 0)
+                    if not placed_msc:
+                        placed_msc = int(getattr(order, "time_setup", 0) or 0) * 1000
+                    if placed_msc and now_msc - placed_msc >= pending_timeout_minutes * 60_000:
+                        _cancel_order(mt5, order)
+                remaining = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
+                if not remaining:
+                    plan["status"] = "completed"
+                    plan["completion_reason"] = "pending_timeout"
+                    _save(path, plan)
+                    return
             return
         plan["status"] = "completed"
         plan["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -231,7 +266,13 @@ def manage(payload: dict[str, Any]) -> dict[str, Any]:
         for path in directory.glob("*.json"):
             plan = json.loads(path.read_text(encoding="utf-8"))
             if plan.get("status") == "active":
-                _manage_plan(mt5, path, plan, int(payload["deviation_points"]))
+                _manage_plan(
+                    mt5,
+                    path,
+                    plan,
+                    int(payload["deviation_points"]),
+                    float(payload.get("pending_timeout_minutes", 0.0)),
+                )
                 managed += 1
     finally:
         mt5.shutdown()

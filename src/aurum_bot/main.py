@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
+import os
 import sys
 import time
 from contextlib import suppress
@@ -315,6 +317,39 @@ async def _journal_sync_loop(
         await asyncio.sleep(config.google_sheets.sync_interval_seconds)
 
 
+def _any_active_plans(accounts: tuple[AccountConfig, ...], strategy_state_dir: Path) -> bool:
+    for account in accounts:
+        if not account.enabled:
+            continue
+        path = strategy_state_dir / account.name
+        if path.is_dir() and any(path.glob("*.json")):
+            return True
+    return False
+
+
+async def _status_writer(config: AppConfig, started_at: float) -> None:
+    """Writes runtime/status.json every 30s so external monitors can check health."""
+    status = config.paths.lock_file.parent / "status.json"
+    pid = os.getpid()
+    while True:
+        try:
+            payload = {
+                "pid": pid,
+                "started_at": datetime.fromtimestamp(started_at).isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "accounts": {
+                    acc.name: acc.enabled for acc in config.accounts
+                },
+            }
+            status.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(30)
+
+
 async def run(config: AppConfig) -> None:
     config.telegram.session_file.parent.mkdir(parents=True, exist_ok=True)
     state = StateStore(config.paths.state_file, config.telegram.channel_id)
@@ -327,21 +362,31 @@ async def run(config: AppConfig) -> None:
     async def strategy_manager_loop() -> None:
         while True:
             try:
+                if not _any_active_plans(config.accounts, config.paths.strategy_state_dir):
+                    await asyncio.sleep(10)
+                    continue
                 async with mt5_lock:
-                    errors = await asyncio.to_thread(
-                        manage_exit_strategies,
-                        config.accounts,
-                        config.trading,
-                        config.paths.strategy_state_dir,
+                    errors = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            manage_exit_strategies,
+                            config.accounts,
+                            config.trading,
+                            config.paths.strategy_state_dir,
+                        ),
+                        timeout=90,
                     )
                 for error in errors:
                     LOGGER.error("Exit strategy manager: %s", error)
+            except asyncio.TimeoutError:
+                LOGGER.error("Exit strategy manager: timed out (90s), restarting loop")
             except asyncio.CancelledError:
                 raise
             except Exception:
                 LOGGER.exception("Exit strategy manager failed")
             await asyncio.sleep(2)
     journal_tasks.append(asyncio.create_task(strategy_manager_loop()))
+    started_at = time.time()
+    journal_tasks.append(asyncio.create_task(_status_writer(config, started_at)))
     if config.google_sheets.enabled:
         candidate = SheetsTradeJournal(config.google_sheets)
         try:

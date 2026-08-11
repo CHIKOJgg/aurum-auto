@@ -22,6 +22,7 @@ from .mt5_commission import (
 )
 from .exit_strategies import effective_target, executable_legs, get_strategy
 from .trading_math import choose_execution, raw_volume_for_risk, volume_for_risk
+from .entry_guards import load_news_events, margin_allowed, news_blocked, spread_allowed
 
 
 def _finish(result: ExecutionResult) -> None:
@@ -406,6 +407,30 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "algorithmic trading is disabled in MT5/account",
             )
 
+        if (
+            float(trading.get("news_window_before_minutes", 0.0)) > 0
+            or float(trading.get("news_window_after_minutes", 0.0)) > 0
+        ):
+            events = load_news_events(
+                Path(str(trading.get("news_events_file", "")))
+            )
+            blocked, title = news_blocked(
+                events,
+                now_msc=time.time_ns() // 1_000_000,
+                window_before_minutes=float(
+                    trading.get("news_window_before_minutes", 0.0)
+                ),
+                window_after_minutes=float(
+                    trading.get("news_window_after_minutes", 0.0)
+                ),
+            )
+            if blocked:
+                return ExecutionResult(
+                    account.name,
+                    "skipped_news",
+                    f"news window active: {title or 'economic event'}",
+                )
+
         broker_symbol = account.broker_symbol(signal.symbol)
         if not mt5.symbol_select(broker_symbol, True):
             return ExecutionResult(
@@ -420,6 +445,19 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 account.name,
                 "failed",
                 f"no symbol/tick data for {broker_symbol}: {mt5.last_error()}",
+            )
+        max_spread_points = int(trading.get("max_spread_points", 0))
+        if not spread_allowed(
+            float(tick.ask),
+            float(tick.bid),
+            max_spread_points=max_spread_points,
+            point=float(symbol_info.point),
+        ):
+            return ExecutionResult(
+                account.name,
+                "skipped_wide_spread",
+                f"spread {float(tick.ask) - float(tick.bid):g} exceeds "
+                f"max_spread_points={max_spread_points}",
             )
 
         preparation_status, preparation_detail = _prepare_for_new_signal(
@@ -554,14 +592,26 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             and abs(float(current_loss)) <= max_market_loss + 1e-9
             and valid_market_geometry
         )
+        market_entry_tolerance_r = float(
+            trading.get("market_entry_tolerance_r", 0.0)
+        )
+        price_within_tolerance = (
+            market_entry_tolerance_r > 0
+            and abs(executable_price - entry)
+            <= market_entry_tolerance_r * abs(entry - stop_loss) + 1e-9
+            and valid_market_geometry
+        )
         execution_kind = choose_execution(
             signal.direction,
             entry,
             stop_loss,
             executable_price,
             minimum_distance,
-            market_risk_in_range=market_risk_in_range,
+            market_risk_in_range=(
+                market_risk_in_range or price_within_tolerance
+            ),
             strict_call_entry=bool(trading.get("strict_call_entry", False)),
+            market_entry_tolerance_r=market_entry_tolerance_r,
         )
         if execution_kind is ExecutionKind.MARKET and strategy.target_by_order_kind is not None:
             market_target, _ = strategy.target_by_order_kind
@@ -588,6 +638,29 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             target_number=target_number,
         )
         comment = f"AURUM:{signal.message_id}"
+        margin_price = (
+            executable_price
+            if execution_kind is ExecutionKind.MARKET
+            else entry
+        )
+        margin_required = mt5.order_calc_margin(
+            order_side,
+            broker_symbol,
+            volume,
+            margin_price,
+        )
+        if not margin_allowed(
+            float(margin_required) if margin_required is not None else None,
+            float(getattr(account_info, "margin_free", None) or 0.0),
+        ):
+            return ExecutionResult(
+                account.name,
+                "failed",
+                f"insufficient free margin: required {margin_required}, "
+                f"free {account_info.margin_free:.2f}",
+                volume=volume,
+                execution_kind=execution_kind.value,
+            )
         if execution_kind is ExecutionKind.MARKET:
             current_price = _normalized(executable_price, digits)
             protected_geometry = (
@@ -692,7 +765,18 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                             if signal.direction is Direction.LONG
                             else take_profit < refreshed_price < stop_loss
                         )
+                    )
+                    or (
+                        market_entry_tolerance_r > 0
+                        and abs(refreshed_price - entry)
+                        <= market_entry_tolerance_r * abs(entry - stop_loss) + 1e-9
+                        and (
+                            stop_loss < refreshed_price < take_profit
+                            if signal.direction is Direction.LONG
+                            else take_profit < refreshed_price < stop_loss
+                        )
                     ),
+                    market_entry_tolerance_r=market_entry_tolerance_r,
                 )
                 if refreshed_kind is ExecutionKind.MARKET:
                     target_number = effective_target(
