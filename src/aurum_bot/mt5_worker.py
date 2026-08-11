@@ -16,6 +16,7 @@ from .models import (
     ExecutionResult,
     Signal,
 )
+from .config import RISK_PERCENT_BASE
 from .mt5_commission import (
     DEFAULT_COMMISSION_PER_LOT_USD,
     infer_round_turn_commission_per_lot,
@@ -529,7 +530,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             )
         raw_volume = raw_volume_for_risk(
             risk_base_usd=account.risk_base_usd,
-            risk_percent=float(trading["risk_percent"]),
+            risk_percent=RISK_PERCENT_BASE * float(trading["risk_multiplier"]),
             loss_for_one_lot=abs(float(loss_one_lot)),
             commission_for_one_lot=commission_one_lot,
         )
@@ -556,7 +557,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
 
         volume = volume_for_risk(
             risk_base_usd=account.risk_base_usd,
-            risk_percent=float(trading["risk_percent"]),
+            risk_percent=RISK_PERCENT_BASE * float(trading["risk_multiplier"]),
             loss_for_one_lot=abs(float(loss_one_lot)),
             volume_min=float(symbol_info.volume_min),
             volume_max=float(symbol_info.volume_max),
@@ -583,12 +584,12 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         current_loss = theoretical_stop_loss_at(executable_price)
         min_market_loss = (
             account.risk_base_usd
-            * float(trading["min_market_risk_percent"])
+            * RISK_PERCENT_BASE * float(trading["min_market_risk_multiplier"])
             / 100
         )
         max_market_loss = (
             account.risk_base_usd
-            * float(trading["max_market_risk_percent"])
+            * RISK_PERCENT_BASE * float(trading["max_market_risk_multiplier"])
             / 100
         )
         valid_market_geometry = (

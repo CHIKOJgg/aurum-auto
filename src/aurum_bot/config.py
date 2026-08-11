@@ -11,6 +11,10 @@ from .exit_strategies import get_strategy
 from .models import AccountConfig
 
 
+# YAML may scale this value but cannot redefine the code-owned risk base.
+RISK_PERCENT_BASE = 1.0
+
+
 @dataclass(frozen=True)
 class TelegramConfig:
     api_id: int
@@ -26,9 +30,9 @@ class TelegramConfig:
 
 @dataclass(frozen=True)
 class TradingConfig:
-    risk_percent: float
-    min_market_risk_percent: float
-    max_market_risk_percent: float
+    risk_multiplier: float
+    min_market_risk_multiplier: float
+    max_market_risk_multiplier: float
     lot_step: float
     deviation_points: int
     send_attempts: int
@@ -47,6 +51,18 @@ class TradingConfig:
     mt5_server_offset_hours: float = 3.0
     close_spread_hard_cap_minutes: float = 10.0
     execution_timeout_seconds: int = 90
+
+    @property
+    def risk_percent(self) -> float:
+        return RISK_PERCENT_BASE * self.risk_multiplier
+
+    @property
+    def min_market_risk_percent(self) -> float:
+        return RISK_PERCENT_BASE * self.min_market_risk_multiplier
+
+    @property
+    def max_market_risk_percent(self) -> float:
+        return RISK_PERCENT_BASE * self.max_market_risk_multiplier
 
 
 @dataclass(frozen=True)
@@ -164,9 +180,9 @@ def load_config(config_path: str | Path) -> AppConfig:
         notification_retry_count=max(0, int(_required(telegram_raw, "notification_retry_count", "telegram"))),
     )
     trading = TradingConfig(
-        risk_percent=float(_required(trading_raw, "risk_percent", "trading")),
-        min_market_risk_percent=float(_required(trading_raw, "min_market_risk_percent", "trading")),
-        max_market_risk_percent=float(_required(trading_raw, "max_market_risk_percent", "trading")),
+        risk_multiplier=float(_required(trading_raw, "risk_multiplier", "trading")),
+        min_market_risk_multiplier=float(_required(trading_raw, "min_market_risk_multiplier", "trading")),
+        max_market_risk_multiplier=float(_required(trading_raw, "max_market_risk_multiplier", "trading")),
         lot_step=float(_required(trading_raw, "lot_step", "trading")),
         deviation_points=int(_required(trading_raw, "deviation_points", "trading")),
         send_attempts=max(1, int(_required(trading_raw, "send_attempts", "trading"))),
@@ -186,16 +202,10 @@ def load_config(config_path: str | Path) -> AppConfig:
         close_spread_hard_cap_minutes=float(_required(trading_raw, "close_spread_hard_cap_minutes", "trading")),
         execution_timeout_seconds=max(1, int(_required(trading_raw, "execution_timeout_seconds", "trading"))),
     )
-    if not 0 < trading.risk_percent <= 100:
-        raise ValueError("trading.risk_percent must be > 0 and <= 100")
-    if trading.min_market_risk_percent != 0.9:
-        raise ValueError(
-            "This strategy is locked to the agreed min_market_risk_percent: 0.9"
-        )
-    if trading.max_market_risk_percent != 1.1:
-        raise ValueError(
-            "This strategy is locked to the agreed max_market_risk_percent: 1.1"
-        )
+    if not 0 < trading.risk_multiplier <= 100:
+        raise ValueError("trading.risk_multiplier must be > 0 and <= 100")
+    if not 0 < trading.min_market_risk_multiplier <= trading.max_market_risk_multiplier:
+        raise ValueError("trading market risk multipliers must be positive and ordered")
     if trading.lot_step != 0.01:
         raise ValueError("This strategy is locked to the agreed lot_step: 0.01")
     if trading.market_entry_tolerance_r < 0:

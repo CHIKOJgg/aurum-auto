@@ -29,13 +29,13 @@ class YamlConfigurationTests(unittest.TestCase):
             ):
                 return load_config(path)
 
-    def test_risk_is_taken_from_yaml_not_locked_in_code(self):
-        config = self._load(lambda data: data["trading"].update(risk_percent=0.5))
+    def test_yaml_multiplier_scales_the_code_owned_one_percent_base(self):
+        config = self._load(lambda data: data["trading"].update(risk_multiplier=0.5))
         self.assertEqual(config.trading.risk_percent, 0.5)
 
     def test_missing_critical_yaml_setting_prevents_startup(self):
-        with self.assertRaisesRegex(ValueError, "trading.risk_percent"):
-            self._load(lambda data: data["trading"].pop("risk_percent"))
+        with self.assertRaisesRegex(ValueError, "trading.risk_multiplier"):
+            self._load(lambda data: data["trading"].pop("risk_multiplier"))
 
 
 if __name__ == "__main__":
