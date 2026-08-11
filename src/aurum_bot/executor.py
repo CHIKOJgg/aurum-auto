@@ -42,11 +42,14 @@ def _run_account(
             input=json.dumps(payload),
             text=True,
             capture_output=True,
-            timeout=90,
+            timeout=trading.execution_timeout_seconds,
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return ExecutionResult(account.name, "failed", "MT5 worker timed out")
+        return ExecutionResult(
+            account.name, "failed",
+            f"MT5 worker timed out after {trading.execution_timeout_seconds}s",
+        )
 
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()
@@ -113,11 +116,14 @@ def manage_exit_strategies(
                 input=json.dumps(payload),
                 text=True,
                 capture_output=True,
-                timeout=75,
+                timeout=trading.execution_timeout_seconds,
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            errors.append(f"{account.name}: strategy_manager timed out after 75s")
+            errors.append(
+                f"{account.name}: strategy_manager timed out after "
+                f"{trading.execution_timeout_seconds}s"
+            )
             continue
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout).strip()

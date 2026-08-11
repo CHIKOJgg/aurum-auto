@@ -267,18 +267,20 @@ def _notification_text(message_id: int, signal: Signal, result: ExecutionResult)
     return f"❌ {message_id} {result.status}: {result.detail}"
 
 
-async def _notification_worker(client: TelegramClient, queue: asyncio.Queue[str]) -> None:
+async def _notification_worker(
+    client: TelegramClient, queue: asyncio.Queue[str], retry_count: int
+) -> None:
     while True:
         text = await queue.get()
         try:
-            for attempt in range(2):
+            for attempt in range(retry_count + 1):
                 try:
                     await client.send_message("me", text)
                     break
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    if attempt:
+                    if attempt >= retry_count:
                         LOGGER.exception("Telegram notification failed")
                     else:
                         LOGGER.warning("Telegram notification failed; retrying once")
@@ -386,7 +388,7 @@ async def _status_writer(config: AppConfig, started_at: float) -> None:
             )
         except Exception:
             pass
-        await asyncio.sleep(30)
+        await asyncio.sleep(config.runtime.status_write_interval_seconds)
 
 
 async def run(config: AppConfig) -> None:
@@ -402,7 +404,7 @@ async def run(config: AppConfig) -> None:
         while True:
             try:
                 if not _any_active_plans(config.accounts, config.paths.strategy_state_dir):
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(config.runtime.exit_strategy_poll_seconds)
                     continue
                 async with mt5_lock:
                     errors = await asyncio.to_thread(
@@ -417,10 +419,12 @@ async def run(config: AppConfig) -> None:
                 raise
             except Exception:
                 LOGGER.exception("Exit strategy manager failed")
-            await asyncio.sleep(2)
-    journal_tasks.append(asyncio.create_task(strategy_manager_loop()))
+            await asyncio.sleep(config.runtime.exit_strategy_poll_seconds)
+    if config.runtime.exit_strategy_manager_enabled:
+        journal_tasks.append(asyncio.create_task(strategy_manager_loop()))
     started_at = time.time()
-    journal_tasks.append(asyncio.create_task(_status_writer(config, started_at)))
+    if config.runtime.status_writer_enabled:
+        journal_tasks.append(asyncio.create_task(_status_writer(config, started_at)))
     if config.google_sheets.enabled:
         candidate = SheetsTradeJournal(config.google_sheets)
         try:
@@ -463,11 +467,16 @@ async def run(config: AppConfig) -> None:
     notification_task: asyncio.Task[None] | None = None
     if config.telegram.notifications_enabled:
         notification_queue = asyncio.Queue()
-        notification_task = asyncio.create_task(_notification_worker(client, notification_queue))
+        notification_task = asyncio.create_task(
+            _notification_worker(
+                client, notification_queue, config.telegram.notification_retry_count
+            )
+        )
     try:
         # Re-run only durable, interrupted executions. The MT5 worker uses the
         # AURUM:<message_id> magic/comment pair to make this idempotent.
-        for message_id, record in state.unfinished_messages():
+        unfinished = state.unfinished_messages() if config.runtime.reconcile_on_startup else []
+        for message_id, record in unfinished:
             raw_signal = record.get("signal")
             if not isinstance(raw_signal, dict):
                 state.mark(message_id, "failed", account_results={})

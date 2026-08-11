@@ -6,11 +6,16 @@ telegram:
   poll_interval_seconds: 20
   session_file: "runtime/telegram_user"
   notifications_enabled: true
+  # Number of retries after the initial Saved Messages notification attempt.
+  notification_retry_count: 1
 
 trading:
+  # The only source of nominal risk. Change this YAML value deliberately.
   risk_percent: 1.0
   # Select one of the strategy IDs documented in README.md.
   exit_strategy: "sl_tp2"
+  # Legacy/default target used by parsers and reports.
+  take_profit_target: 2
   # true: always place an exact-TVH pending order (limit/stop), never enter at market.
   strict_call_entry: true
   # false: archive calls without an image; true: also execute them in MT5.
@@ -29,6 +34,8 @@ trading:
   max_spread_points: 50
   mt5_server_offset_hours: 3
   close_spread_hard_cap_minutes: 10
+  # Hard timeout for every isolated MT5 execution subprocess.
+  execution_timeout_seconds: 90
   # Skip entries inside news windows. Events are listed in news_events_file
   # as [{start_utc: "YYYY-MM-DDTHH:MM", title: "..."}]; windows before/after in
   # minutes. Both windows 0 = news filter disabled.
@@ -96,3 +103,11 @@ google_sheets:
   account: "fxpro_demo"
   sync_interval_seconds: 120
   history_lookback_days: 45
+
+runtime:
+  # Every runtime feature is controlled here, without source-code edits.
+  reconcile_on_startup: true
+  exit_strategy_manager_enabled: true
+  exit_strategy_poll_seconds: 2
+  status_writer_enabled: true
+  status_write_interval_seconds: 30

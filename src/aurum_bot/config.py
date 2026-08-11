@@ -20,7 +20,8 @@ class TelegramConfig:
     channel_title: str
     poll_interval_seconds: int
     session_file: Path
-    notifications_enabled: bool = True
+    notifications_enabled: bool
+    notification_retry_count: int
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,16 @@ class TradingConfig:
     news_window_after_minutes: float = 0.0
     mt5_server_offset_hours: float = 3.0
     close_spread_hard_cap_minutes: float = 10.0
+    execution_timeout_seconds: int = 90
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    reconcile_on_startup: bool
+    exit_strategy_manager_enabled: bool
+    exit_strategy_poll_seconds: float
+    status_writer_enabled: bool
+    status_write_interval_seconds: float
 
 
 @dataclass(frozen=True)
@@ -75,6 +86,7 @@ class AppConfig:
     accounts: tuple[AccountConfig, ...]
     paths: PathsConfig
     google_sheets: GoogleSheetsConfig
+    runtime: RuntimeConfig
 
 
 def load_dotenv(path: Path) -> None:
@@ -106,6 +118,12 @@ def _mapping(data: Any, name: str) -> dict[str, Any]:
     return data
 
 
+def _required(mapping: dict[str, Any], key: str, section: str) -> Any:
+    if key not in mapping:
+        raise ValueError(f"{section}.{key} must be explicitly configured in YAML")
+    return mapping[key]
+
+
 def load_config(config_path: str | Path) -> AppConfig:
     path = Path(config_path).resolve()
     root = path.parent
@@ -126,6 +144,7 @@ def load_config(config_path: str | Path) -> AppConfig:
     telegram_raw = _mapping(raw.get("telegram"), "telegram")
     trading_raw = _mapping(raw.get("trading"), "trading")
     paths_raw = _mapping(raw.get("paths"), "paths")
+    runtime_raw = _mapping(raw.get("runtime"), "runtime")
 
     api_id_text = _required_env("TELEGRAM_API_ID")
     try:
@@ -141,53 +160,34 @@ def load_config(config_path: str | Path) -> AppConfig:
         channel_title=str(telegram_raw["channel_title"]),
         poll_interval_seconds=max(20, int(telegram_raw["poll_interval_seconds"])),
         session_file=_resolve(root, str(telegram_raw["session_file"])),
-        notifications_enabled=bool(telegram_raw.get("notifications_enabled", True)),
+        notifications_enabled=bool(_required(telegram_raw, "notifications_enabled", "telegram")),
+        notification_retry_count=max(0, int(_required(telegram_raw, "notification_retry_count", "telegram"))),
     )
     trading = TradingConfig(
-        risk_percent=float(trading_raw.get("risk_percent", 1.0)),
-        min_market_risk_percent=float(
-            trading_raw.get("min_market_risk_percent", 0.9)
-        ),
-        max_market_risk_percent=float(
-            trading_raw.get("max_market_risk_percent", 1.1)
-        ),
-        lot_step=float(trading_raw.get("lot_step", 0.01)),
-        deviation_points=int(trading_raw.get("deviation_points", 20)),
-        send_attempts=max(1, int(trading_raw.get("send_attempts", 3))),
-        retry_delay_seconds=max(0.0, float(trading_raw.get("retry_delay_seconds", 2))),
-        magic_number=int(trading_raw.get("magic_number", 397897)),
-        take_profit_target=int(trading_raw.get("take_profit_target", 2)),
-        exit_strategy=str(
-            trading_raw.get(
-                "exit_strategy",
-                f"sl_tp{int(trading_raw.get('take_profit_target', 2))}",
-            )
-        ).strip(),
-        strict_call_entry=bool(trading_raw.get("strict_call_entry", True)),
-        enable_indicator_2=bool(trading_raw.get("enable_indicator_2", False)),
-        market_entry_tolerance_r=float(
-            trading_raw.get("market_entry_tolerance_r", 0.0)
-        ),
-        pending_timeout_minutes=float(
-            trading_raw.get("pending_timeout_minutes", 0.0)
-        ),
-        max_spread_points=int(trading_raw.get("max_spread_points", 0)),
-        news_events_file=str(
-            trading_raw.get("news_events_file", "runtime/news_events.json")
-        ).strip(),
-        news_window_before_minutes=float(
-            trading_raw.get("news_window_before_minutes", 0.0)
-        ),
-        news_window_after_minutes=float(
-            trading_raw.get("news_window_after_minutes", 0.0)
-        ),
-        mt5_server_offset_hours=float(trading_raw.get("mt5_server_offset_hours", 3.0)),
-        close_spread_hard_cap_minutes=float(
-            trading_raw.get("close_spread_hard_cap_minutes", 10.0)
-        ),
+        risk_percent=float(_required(trading_raw, "risk_percent", "trading")),
+        min_market_risk_percent=float(_required(trading_raw, "min_market_risk_percent", "trading")),
+        max_market_risk_percent=float(_required(trading_raw, "max_market_risk_percent", "trading")),
+        lot_step=float(_required(trading_raw, "lot_step", "trading")),
+        deviation_points=int(_required(trading_raw, "deviation_points", "trading")),
+        send_attempts=max(1, int(_required(trading_raw, "send_attempts", "trading"))),
+        retry_delay_seconds=max(0.0, float(_required(trading_raw, "retry_delay_seconds", "trading"))),
+        magic_number=int(_required(trading_raw, "magic_number", "trading")),
+        take_profit_target=int(_required(trading_raw, "take_profit_target", "trading")),
+        exit_strategy=str(_required(trading_raw, "exit_strategy", "trading")).strip(),
+        strict_call_entry=bool(_required(trading_raw, "strict_call_entry", "trading")),
+        enable_indicator_2=bool(_required(trading_raw, "enable_indicator_2", "trading")),
+        market_entry_tolerance_r=float(_required(trading_raw, "market_entry_tolerance_r", "trading")),
+        pending_timeout_minutes=float(_required(trading_raw, "pending_timeout_minutes", "trading")),
+        max_spread_points=int(_required(trading_raw, "max_spread_points", "trading")),
+        news_events_file=str(_required(trading_raw, "news_events_file", "trading")).strip(),
+        news_window_before_minutes=float(_required(trading_raw, "news_window_before_minutes", "trading")),
+        news_window_after_minutes=float(_required(trading_raw, "news_window_after_minutes", "trading")),
+        mt5_server_offset_hours=float(_required(trading_raw, "mt5_server_offset_hours", "trading")),
+        close_spread_hard_cap_minutes=float(_required(trading_raw, "close_spread_hard_cap_minutes", "trading")),
+        execution_timeout_seconds=max(1, int(_required(trading_raw, "execution_timeout_seconds", "trading"))),
     )
-    if trading.risk_percent != 1.0:
-        raise ValueError("This strategy is locked to risk_percent: 1.0")
+    if not 0 < trading.risk_percent <= 100:
+        raise ValueError("trading.risk_percent must be > 0 and <= 100")
     if trading.min_market_risk_percent != 0.9:
         raise ValueError(
             "This strategy is locked to the agreed min_market_risk_percent: 0.9"
@@ -213,6 +213,13 @@ def load_config(config_path: str | Path) -> AppConfig:
     if trading.take_profit_target not in {1, 2, 3, 4}:
         raise ValueError("trading.take_profit_target must be an integer from 1 to 4")
     get_strategy(trading.exit_strategy)
+    runtime = RuntimeConfig(
+        reconcile_on_startup=bool(_required(runtime_raw, "reconcile_on_startup", "runtime")),
+        exit_strategy_manager_enabled=bool(_required(runtime_raw, "exit_strategy_manager_enabled", "runtime")),
+        exit_strategy_poll_seconds=max(0.1, float(_required(runtime_raw, "exit_strategy_poll_seconds", "runtime"))),
+        status_writer_enabled=bool(_required(runtime_raw, "status_writer_enabled", "runtime")),
+        status_write_interval_seconds=max(1.0, float(_required(runtime_raw, "status_write_interval_seconds", "runtime"))),
+    )
 
     accounts_raw = raw.get("accounts")
     if not isinstance(accounts_raw, list) or not accounts_raw:
@@ -324,4 +331,5 @@ def load_config(config_path: str | Path) -> AppConfig:
         accounts=tuple(accounts),
         paths=paths,
         google_sheets=google_sheets,
+        runtime=runtime,
     )
