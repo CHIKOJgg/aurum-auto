@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,6 +48,7 @@ def _run_account(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=os.environ.copy(),
         )
         try:
             stdout, stderr = proc.communicate(
@@ -135,6 +137,7 @@ def manage_exit_strategies(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=os.environ.copy(),
             )
             try:
                 stdout, stderr = proc.communicate(
