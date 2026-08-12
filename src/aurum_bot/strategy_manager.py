@@ -13,6 +13,9 @@ from .exit_strategies import get_strategy
 from .models import AccountConfig, Direction, ExecutionKind
 from .mt5_worker import _filling_candidates, _normalized, _success_codes
 
+import logging
+LOGGER = logging.getLogger("aurum_bot.strategy_manager")
+
 
 def _save(path: Path, plan: dict[str, Any]) -> None:
     temporary = path.with_suffix(".json.tmp")
@@ -31,8 +34,11 @@ def _matching(items: tuple[Any, ...] | list[Any], plan: dict[str, Any]) -> list[
         item_comment = str(getattr(item, "comment", ""))
         if item_ticket == order_ticket:
             results.append(item)
-        elif item_magic == magic and (item_comment.startswith(comment[:20]) or comment.startswith(item_comment[:20])):
-            results.append(item)
+        elif item_magic == magic:
+            ic = str(item_comment)
+            import re
+            if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                results.append(item)
     return results
 
 
@@ -119,6 +125,15 @@ def _cancel_order(mt5: Any, order: Any) -> bool:
     }
     ok = int(result.retcode) in accepted
     if not ok:
+        if int(result.retcode) == 10030:
+            LOGGER.info("_cancel_order fallback for ticket %s without symbol/magic", order_ticket)
+            fallback_request = {
+                "action": mt5.TRADE_ACTION_REMOVE,
+                "order": order_ticket,
+            }
+            fallback_result = mt5.order_send(fallback_request)
+            if fallback_result is not None and int(fallback_result.retcode) in accepted:
+                return True
         LOGGER.warning("_cancel_order failed for ticket %s: retcode=%s comment=%s", order_ticket, result.retcode, result.comment)
     return ok
 
@@ -223,6 +238,11 @@ def _manage_plan(
                     _save(path, plan)
                     return
             return
+        missing_cycles = int(plan.get("missing_cycles", 0))
+        if missing_cycles < 5:
+            plan["missing_cycles"] = missing_cycles + 1
+            _save(path, plan)
+            return
         direction = Direction(plan["direction"])
         tick = mt5.symbol_info_tick(symbol)
         stop = float(plan.get("stop_loss", 0.0))
@@ -262,8 +282,10 @@ def _manage_plan(
 
     def close_allowed() -> bool:
         effective_max_spread = max_spread_points
-        if symbol_max_spread_points and symbol.upper() in symbol_max_spread_points:
-            effective_max_spread = symbol_max_spread_points[symbol.upper()]
+        if symbol_max_spread_points:
+            signal_sym = str(plan.get("signal_symbol", symbol)).upper()
+            if signal_sym in symbol_max_spread_points:
+                effective_max_spread = symbol_max_spread_points[signal_sym]
         if not exit_spread_guard_enabled or effective_max_spread <= 0:
             return True
         tick = mt5.symbol_info_tick(symbol)

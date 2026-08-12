@@ -95,6 +95,9 @@ def parse_signal(
     if not valid_geometry:
         return None
 
+    if set(take_profits) != {1, 2, 3, 4}:
+        return None
+
     return Signal(
         message_id=message_id,
         symbol=symbol,
@@ -103,8 +106,9 @@ def parse_signal(
         stop_loss=stop_loss,
         take_profit=take_profit,
         take_profits=(
-            tuple(float(take_profits[number]) for number in range(1, 5))
-            if all(number in take_profits for number in range(1, 5))
-            else None
+            float(take_profits[1]),
+            float(take_profits[2]),
+            float(take_profits[3]),
+            float(take_profits[4]),
         ),
     )

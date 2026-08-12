@@ -34,8 +34,8 @@ class YamlConfigurationTests(unittest.TestCase):
         self.assertEqual(config.trading.risk_percent, 0.5)
 
     def test_missing_critical_yaml_setting_prevents_startup(self):
-        with self.assertRaisesRegex(ValueError, "trading.risk_multiplier"):
-            self._load(lambda data: data["trading"].pop("risk_multiplier"))
+        with self.assertRaisesRegex(ValueError, "trading.lot_step"):
+            self._load(lambda data: data["trading"].pop("lot_step"))
 
 
 if __name__ == "__main__":

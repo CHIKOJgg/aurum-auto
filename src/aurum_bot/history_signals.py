@@ -4,7 +4,7 @@ import csv
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,16 +14,13 @@ from .parser import (
     ENTRY_RE,
     HEADER_RE,
     SL_RE,
+    TP_RE,
     is_supported_symbol,
     normalize_signal_symbol,
 )
 
 
 MOSCOW_TZ = timezone(timedelta(hours=3), "Europe/Moscow")
-TP_RE = re.compile(
-    r"(?im)^\s*🎯?\s*TP\s*(?P<number>[1-4])\s+"
-    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
-)
 
 
 @dataclass(frozen=True)

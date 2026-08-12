@@ -48,7 +48,7 @@ class TradingConfig:
     news_events_file: str = ""
     news_window_before_minutes: float = 0.0
     news_window_after_minutes: float = 0.0
-    mt5_server_offset_hours: float = 3.0
+    mt5_server_offset_hours: float = 0.0
     # "fixed" uses mt5_server_offset_hours; "auto" detects offset from MT5.
     server_time_mode: str = "auto"
     close_spread_hard_cap_minutes: float = 10.0
@@ -69,6 +69,7 @@ class TradingConfig:
     entry_spread_guard_enabled: bool = True
     news_guard_enabled: bool = True
     margin_guard_enabled: bool = True
+    margin_guard_level: float = 200.0
     exit_spread_guard_enabled: bool = True
     close_opposite_positions: bool = False
 
@@ -281,25 +282,26 @@ def load_config(config_path: str | Path) -> AppConfig:
         return value
 
     trading = TradingConfig(
-        risk_multiplier=float(_required(trading_raw, "risk_multiplier", "trading")),
-        min_market_risk_multiplier=float(_required(trading_raw, "min_market_risk_multiplier", "trading")),
-        max_market_risk_multiplier=float(_required(trading_raw, "max_market_risk_multiplier", "trading")),
+        risk_multiplier=float(trading_raw.get("risk_multiplier", trading_raw.get("risk_percent", 1.0))),
+        min_market_risk_multiplier=float(trading_raw.get("min_market_risk_multiplier", trading_raw.get("min_market_risk_percent", 0.1))),
+        max_market_risk_multiplier=float(trading_raw.get("max_market_risk_multiplier", trading_raw.get("max_market_risk_percent", 5.0))),
         lot_step=float(_required(trading_raw, "lot_step", "trading")),
         deviation_points=int(_required(trading_raw, "deviation_points", "trading")),
-        send_attempts=max(1, int(_required(trading_raw, "send_attempts", "trading"))),
-        retry_delay_seconds=max(0.0, float(_required(trading_raw, "retry_delay_seconds", "trading"))),
+        send_attempts=max(1, int(trading_raw.get("send_attempts", 3))),
+        retry_delay_seconds=max(0.0, float(trading_raw.get("retry_delay_seconds", 0.5))),
         magic_number=int(_required(trading_raw, "magic_number", "trading")),
-        take_profit_target=int(_required(trading_raw, "take_profit_target", "trading")),
-        exit_strategy=str(_required(trading_raw, "exit_strategy", "trading")).strip(),
-        strict_call_entry=bool(_required(trading_raw, "strict_call_entry", "trading")),
-        enable_indicator_2=bool(_required(trading_raw, "enable_indicator_2", "trading")),
-        market_entry_tolerance_r=float(_required(trading_raw, "market_entry_tolerance_r", "trading")),
-        pending_timeout_minutes=float(_required(trading_raw, "pending_timeout_minutes", "trading")),
-        max_spread_points=int(_required(trading_raw, "max_spread_points", "trading")),
-        news_events_file=str(_required(trading_raw, "news_events_file", "trading")).strip(),
-        news_window_before_minutes=float(_required(trading_raw, "news_window_before_minutes", "trading")),
-        news_window_after_minutes=float(_required(trading_raw, "news_window_after_minutes", "trading")),
-        mt5_server_offset_hours=float(_required(trading_raw, "mt5_server_offset_hours", "trading")),
+        take_profit_target=int(trading_raw.get("take_profit_target", 2)),
+        exit_strategy=str(trading_raw.get("exit_strategy", "sl_tp2")).strip(),
+        strict_call_entry=_guard_bool("strict_call_entry", True),
+        enable_indicator_2=_guard_bool("enable_indicator_2", False),
+        market_entry_tolerance_r=float(trading_raw.get("market_entry_tolerance_r", 0.0)),
+        pending_timeout_minutes=float(trading_raw.get("pending_timeout_minutes", 0.0)),
+        max_spread_points=int(trading_raw.get("max_spread_points", 0)),
+        news_events_file=str(_resolve(root, trading_raw.get("news_events_file", "runtime/news_events.json"))).strip(),
+        news_window_before_minutes=float(trading_raw.get("news_window_before_minutes", 0.0)),
+        news_window_after_minutes=float(trading_raw.get("news_window_after_minutes", 0.0)),
+        mt5_server_offset_hours=float(trading_raw.get("mt5_server_offset_hours", 0.0)),
+        margin_guard_level=float(trading_raw.get("margin_guard_level", 200.0)),
         server_time_mode=str(trading_raw.get("server_time_mode", "auto")).strip().lower(),
         close_spread_hard_cap_minutes=float(_required(trading_raw, "close_spread_hard_cap_minutes", "trading")),
         execution_timeout_seconds=max(1, int(_required(trading_raw, "execution_timeout_seconds", "trading"))),

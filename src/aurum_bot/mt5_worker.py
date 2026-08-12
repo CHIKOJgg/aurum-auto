@@ -16,6 +16,19 @@ from .models import (
     ExecutionResult,
     Signal,
 )
+
+
+def _get_take_profit(signal: Signal, target_number: int) -> float:
+    if not signal.take_profits:
+        return signal.take_profit
+    idx = target_number - 1
+    return (
+        signal.take_profits[idx]
+        if idx < len(signal.take_profits)
+        else signal.take_profits[-1]
+    )
+
+
 from .config import RISK_PERCENT_BASE
 from .mt5_commission import (
     DEFAULT_COMMISSION_PER_LOT_USD,
@@ -45,7 +58,63 @@ def _save_strategy_plan(directory: str | None, account: str, plan: dict[str, Any
         json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    os.replace(temporary, target)
+    temporary.replace(target)
+
+
+def _build_strategy_plan(
+    signal: Signal,
+    strategy: Any,
+    broker_symbol: str,
+    magic: int,
+    comment: str,
+    ticket: int,
+    execution_kind: ExecutionKind,
+    stop_loss: float,
+    volume: float,
+    volume_min: float,
+    volume_step: float,
+) -> dict[str, Any]:
+    target_number = effective_target(
+        strategy,
+        execution_kind=execution_kind.value,
+        symbol=signal.symbol,
+        published_at_ms=None,
+    )
+    exit_legs = executable_legs(
+        strategy,
+        total_volume=volume,
+        volume_min=volume_min,
+        volume_step=volume_step,
+        target_number=target_number,
+    )
+    return {
+        "version": 1,
+        "status": "active",
+        "message_id": signal.message_id,
+        "strategy": strategy.key,
+        "symbol": broker_symbol,
+        "signal_symbol": signal.symbol,
+        "direction": signal.direction.value,
+        "magic": magic,
+        "comment": comment,
+        "order_ticket": ticket,
+        "execution_kind": execution_kind.value,
+        "call_entry": signal.entry,
+        "stop_loss": stop_loss,
+        "take_profits": list(signal.take_profits) if signal.take_profits else [],
+        "final_target": target_number,
+        "exit_legs": [
+            {"target": target, "volume": leg_volume, "closed": False}
+            for target, leg_volume in exit_legs
+        ],
+        "initial_volume": volume,
+        "active_stop_target": -1,
+        "touched_target": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_check_msc": None,
+        "entry_time_msc": None,
+        "entry_price": None,
+    }
 
 
 def _success_codes(mt5: Any) -> set[int]:
@@ -215,16 +284,18 @@ def _already_applied(
     if execution_kind is ExecutionKind.MARKET:
         positions = mt5.positions_get(symbol=symbol) or ()
         for position in positions:
-            if (
-                int(position.magic) == magic
-                and str(position.comment).startswith(comment[:20])
-            ):
-                return int(position.ticket)
+            if int(position.magic) == magic:
+                ic = str(position.comment)
+                import re
+                if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                    return int(position.ticket)
         return None
 
     orders = mt5.orders_get(symbol=symbol) or ()
     for order in orders:
-        if int(order.magic) == magic and str(order.comment).startswith(comment[:20]):
+        ic = str(order.comment)
+        import re
+        if int(order.magic) == magic and re.search(rf"{re.escape(comment)}(?!\d)", ic):
             return int(order.ticket)
     return None
 
@@ -473,13 +544,29 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 f"MT5 API query failed while checking existing orders for {broker_symbol}: {mt5.last_error()}",
             )
         for item in tuple(existing_pos) + tuple(existing_ord):
-            if int(getattr(item, "magic", -1)) == magic and (
-                str(getattr(item, "comment", "")).startswith(comment[:20])
-                or comment.startswith(str(getattr(item, "comment", ""))[:20])
-            ):
-                return ExecutionResult(
-                    account.name, "executed", "executed_existing", ticket=int(item.ticket)
-                )
+            if int(getattr(item, "magic", -1)) == magic:
+                ic = str(getattr(item, "comment", ""))
+                import re
+                if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                    is_position = getattr(item, "time_update_msc", None) is not None
+                    exec_kind = ExecutionKind.MARKET if is_position else ExecutionKind.PENDING
+                    plan = _build_strategy_plan(
+                        signal=signal,
+                        strategy=strategy,
+                        broker_symbol=broker_symbol,
+                        magic=magic,
+                        comment=comment,
+                        ticket=int(item.ticket),
+                        execution_kind=exec_kind,
+                        stop_loss=signal.stop_loss,
+                        volume=float(getattr(item, "volume_initial", getattr(item, "volume_current", 0.0))),
+                        volume_min=float(symbol_info.volume_min) if symbol_info else 0.01,
+                        volume_step=float(symbol_info.volume_step) if symbol_info else 0.01,
+                    )
+                    _save_strategy_plan(payload.get("strategy_state_dir"), account.name, plan)
+                    return ExecutionResult(
+                        account.name, "executed", "executed_existing", ticket=int(item.ticket)
+                    )
         symbol_spreads = trading.get("symbol_max_spread_points") or {}
         max_spread_points = int(
             symbol_spreads.get(
@@ -530,7 +617,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         stop_loss = _normalized(signal.stop_loss, digits)
         if signal.take_profits is None:
             return ExecutionResult(account.name, "failed", "selected exit strategy requires TP1-TP4")
-        take_profit = _normalized(signal.take_profits[strategy.target_number - 1], digits)
+        take_profit = _normalized(_get_take_profit(signal, strategy.target_number), digits)
 
         order_side = (
             mt5.ORDER_TYPE_BUY
@@ -567,7 +654,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 signal.symbol.upper(),
                 symbol_risks.get(
                     broker_symbol.upper(),
-                    trading.get("risk_multiplier", 2.0),
+                    trading.get("risk_multiplier", 1.0),
                 ),
             )
         )
@@ -685,7 +772,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             symbol=signal.symbol,
             published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
         )
-        take_profit = _normalized(signal.take_profits[target_number - 1], digits)
+        take_profit = _normalized(_get_take_profit(signal, target_number), digits)
         exit_legs = executable_legs(
             strategy,
             total_volume=volume,
@@ -708,6 +795,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         if bool(trading.get("margin_guard_enabled", True)) and not margin_allowed(
             float(margin_required) if margin_required is not None else None,
             float(getattr(account_info, "margin_free", None) or 0.0),
+            guard_level=float(trading.get("margin_guard_level", 0.0)),
         ):
             return ExecutionResult(
                 account.name,
@@ -841,7 +929,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         symbol=signal.symbol,
                         published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
                     )
-                    take_profit = _normalized(signal.take_profits[target_number - 1], digits)
+                    take_profit = _normalized(_get_take_profit(signal, target_number), digits)
                     exit_legs = executable_legs(
                         strategy,
                         total_volume=volume,
@@ -908,49 +996,43 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             if not matching_positions:
                 matching_positions = tuple(mt5.positions_get(symbol=broker_symbol) or ())
             for pos in matching_positions:
-                if int(getattr(pos, "magic", -1)) == magic and (
+                pos_ticket = int(pos.ticket)
+                # Only match the exact position ticket, or fallback to exact comment match for this signal
+                is_exact_match = (pos_ticket == ticket)
+                if not is_exact_match and int(getattr(pos, "magic", -1)) == magic:
+                    ic = str(getattr(pos, "comment", ""))
+                    import re
+                    is_exact_match = bool(re.search(rf"{re.escape(comment)}(?!\d)", ic))
+                    
+                if is_exact_match and (
                     float(getattr(pos, "sl", 0.0) or 0.0) == 0.0
                     or float(getattr(pos, "tp", 0.0) or 0.0) == 0.0
                 ):
-                    mt5.order_send({
-                        "action": mt5.TRADE_ACTION_SLTP,
-                        "symbol": broker_symbol,
-                        "position": int(pos.ticket),
-                        "sl": stop_loss,
-                        "tp": take_profit,
-                    })
-        _save_strategy_plan(
-            payload.get("strategy_state_dir"),
-            account.name,
-            {
-                "version": 1,
-                "status": "active",
-                "message_id": signal.message_id,
-                "strategy": strategy.key,
-                "symbol": broker_symbol,
-                "signal_symbol": signal.symbol,
-                "direction": signal.direction.value,
-                "magic": magic,
-                "comment": comment,
-                "order_ticket": ticket,
-                "execution_kind": execution_kind.value,
-                "call_entry": entry,
-                "stop_loss": stop_loss,
-                "take_profits": list(signal.take_profits),
-                "final_target": target_number,
-                "exit_legs": [
-                    {"target": target, "volume": leg_volume, "closed": False}
-                    for target, leg_volume in exit_legs
-                ],
-                "initial_volume": volume,
-                "active_stop_target": -1,
-                "touched_target": 0,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "last_check_msc": None,
-                "entry_time_msc": None,
-                "entry_price": None,
-            },
+                    for _retry in range(3):
+                        sltp_result = mt5.order_send({
+                            "action": mt5.TRADE_ACTION_SLTP,
+                            "symbol": broker_symbol,
+                            "position": pos_ticket,
+                            "sl": stop_loss,
+                            "tp": take_profit,
+                        })
+                        if sltp_result and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
+                            break
+                        import time; time.sleep(0.1)
+        plan = _build_strategy_plan(
+            signal=signal,
+            strategy=strategy,
+            broker_symbol=broker_symbol,
+            magic=magic,
+            comment=comment,
+            ticket=ticket,
+            execution_kind=execution_kind,
+            stop_loss=stop_loss,
+            volume=volume,
+            volume_min=float(symbol_info.volume_min),
+            volume_step=float(symbol_info.volume_step),
         )
+        _save_strategy_plan(payload.get("strategy_state_dir"), account.name, plan)
         return ExecutionResult(
             account.name,
             "executed",

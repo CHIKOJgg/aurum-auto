@@ -20,7 +20,7 @@ from .backtest_engine import (
 )
 from .config import TradingConfig
 from .history_signals import HistoricalSignal
-from .models import AccountConfig, Direction
+from .models import AccountConfig
 from .mt5_history import MT5History, SymbolMetadata
 from .mt5_commission import DEFAULT_COMMISSION_PER_LOT_USD
 from .trading_math import raw_volume_for_risk, volume_for_risk

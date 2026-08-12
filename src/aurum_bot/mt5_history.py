@@ -131,7 +131,7 @@ class MT5History:
                 f"{chunk_end_exclusive:%Y%m%dT%H%M%S}.npy"
             )
             if cache_path.exists():
-                compact = np.load(cache_path)
+                compact = np.load(cache_path, mmap_mode="r")
                 LOGGER.info(
                     "Loaded cached %s ticks for %s from %s",
                     len(compact),
@@ -156,9 +156,9 @@ class MT5History:
                 compact["time_msc"] = raw["time_msc"][valid]
                 compact["bid"] = raw["bid"][valid]
                 compact["ask"] = raw["ask"][valid]
-                temp_path = cache_path.with_suffix(".npy.tmp")
+                temp_path = cache_path.with_name(cache_path.name + ".tmp")
                 np.save(temp_path, compact, allow_pickle=False)
-                os.replace(temp_path, cache_path)
+                os.replace(temp_path.with_name(temp_path.name + ".npy"), cache_path)
                 LOGGER.info(
                     "Downloaded %s ticks for %s (%s)",
                     len(compact),
@@ -230,9 +230,9 @@ class MT5History:
             f"{safe_symbol}_M1_{direction.value}_"
             f"{start_utc:%Y%m%dT%H%M%S}_{end_utc:%Y%m%dT%H%M%S}.npy"
         )
-        temp_path = cache_path.with_suffix(".npy.tmp")
+        temp_path = cache_path.with_name(cache_path.name + ".tmp")
         np.save(temp_path, result, allow_pickle=False)
-        os.replace(temp_path, cache_path)
+        os.replace(temp_path.with_name(temp_path.name + ".npy"), cache_path)
         LOGGER.info(
             "Prepared %s conservative M1 fallback ticks from %s bars for %s",
             len(result),

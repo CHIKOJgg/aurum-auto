@@ -262,7 +262,7 @@ async def handle_message(
 
 
 def _notification_text(message_id: int, signal: Signal, result: ExecutionResult) -> str:
-    if result.status == "executed":
+    if result.status.startswith("executed"):
         return f"♻️ {message_id} {signal.symbol} {signal.direction.value} executed lot={result.volume:g}" if result.volume is not None else f"♻️ {message_id} {signal.symbol} {signal.direction.value} executed"
     if result.status.startswith("skipped"):
         return f"⛔ {message_id} {result.status}: {result.detail}"

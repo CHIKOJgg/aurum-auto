@@ -40,9 +40,11 @@ class MarginGuardTests(unittest.TestCase):
     def test_insufficient_margin_is_rejected(self):
         self.assertFalse(margin_allowed(250.0, 200.0))
 
-    def test_missing_values_are_rejected(self):
-        self.assertFalse(margin_allowed(None, 200.0))
-        self.assertFalse(margin_allowed(150.0, None))
+    def test_missing_values_are_accepted(self):
+        """MT5 API failures resulting in None should bypass the guard to avoid blocking trading."""
+        self.assertTrue(margin_allowed(None, 1000.0))
+        self.assertTrue(margin_allowed(100.0, None))
+        self.assertTrue(margin_allowed(None, None))
 
 
 class NewsFilterTests(unittest.TestCase):

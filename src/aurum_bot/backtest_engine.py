@@ -8,7 +8,7 @@ import numpy as np
 
 from .history_signals import HistoricalSignal
 from .models import Direction
-from .exit_strategies import STRATEGIES, StrategySpec
+from .exit_strategies import STRATEGIES, StrategySpec  # noqa: F401
 
 
 _LEGACY_STRATEGIES = (

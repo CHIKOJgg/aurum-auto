@@ -20,13 +20,17 @@ def spread_allowed(
     return (ask - bid) <= threshold + 1e-9
 
 
-def margin_allowed(margin_required: float | None, margin_free: float | None) -> bool:
+def margin_allowed(
+    margin_required: float | None,
+    margin_free: float | None,
+    guard_level: float = 0.0,
+) -> bool:
     """Reject when the trade would require more free margin than available."""
     if margin_required is None or margin_free is None:
-        return False
+        return True
     if margin_required < 0 or margin_free < 0:
-        return False
-    return margin_required <= margin_free + 1e-9
+        return True
+    return margin_required + guard_level <= margin_free + 1e-9
 
 
 def load_news_events(path: Path) -> list[dict[str, Any]]:
