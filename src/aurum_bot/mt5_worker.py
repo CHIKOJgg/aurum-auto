@@ -464,8 +464,19 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         # preparation. A restarted process must never close/cancel a live
         # AURUM order before recognizing its own earlier successful attempt.
         comment = f"AURUM:{signal.message_id}"
-        for item in tuple(mt5.positions_get(symbol=broker_symbol) or ()) + tuple(mt5.orders_get(symbol=broker_symbol) or ()):
-            if int(getattr(item, "magic", -1)) == magic and str(getattr(item, "comment", "")).startswith(comment[:20]):
+        existing_pos = mt5.positions_get(symbol=broker_symbol)
+        existing_ord = mt5.orders_get(symbol=broker_symbol)
+        if existing_pos is None or existing_ord is None:
+            return ExecutionResult(
+                account.name,
+                "failed",
+                f"MT5 API query failed while checking existing orders for {broker_symbol}: {mt5.last_error()}",
+            )
+        for item in tuple(existing_pos) + tuple(existing_ord):
+            if int(getattr(item, "magic", -1)) == magic and (
+                str(getattr(item, "comment", "")).startswith(comment[:20])
+                or comment.startswith(str(getattr(item, "comment", ""))[:20])
+            ):
                 return ExecutionResult(
                     account.name, "executed", "executed_existing", ticket=int(item.ticket)
                 )

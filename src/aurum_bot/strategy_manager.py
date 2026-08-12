@@ -78,7 +78,15 @@ def _modify_position(mt5: Any, position: Any, *, stop: float, take_profit: float
         "sl": stop,
         "tp": take_profit,
     })
-    return result is not None and int(result.retcode) in _success_codes(mt5)
+    if result is not None and int(result.retcode) in _success_codes(mt5):
+        return True
+    LOGGER.warning(
+        "_modify_position failed for ticket %s: retcode=%s comment=%s",
+        getattr(position, "ticket", "unknown"),
+        getattr(result, "retcode", None),
+        getattr(result, "comment", None),
+    )
+    return False
 
 
 def _cancel_order(mt5: Any, order: Any) -> bool:
