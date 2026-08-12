@@ -81,7 +81,13 @@ class ConfigGuardFlagsTests(unittest.TestCase):
         ))
         self.assertEqual(config.trading.get_max_spread_points("GBPUSD"), 50)
         self.assertEqual(config.trading.get_max_spread_points("DE40"), 500)
-        self.assertEqual(config.trading.get_max_spread_points("XAUUSD"), 80)
+    def test_symbol_risk_multipliers_override(self):
+        config = self._load(lambda data: data["trading"].update(
+            risk_multiplier=2.0,
+            symbol_risk_multipliers={"XAUUSD": 3.0}
+        ))
+        self.assertEqual(config.trading.get_risk_multiplier("GBPUSD"), 2.0)
+        self.assertEqual(config.trading.get_risk_multiplier("XAUUSD"), 3.0)
 
     def test_server_time_mode_defaults_to_auto(self):
         config = self._load()

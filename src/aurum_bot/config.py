@@ -60,6 +60,8 @@ class TradingConfig:
     symbol_aliases: dict[str, str] = None  # type: ignore[assignment]
     # Per-symbol max spread points overrides.
     symbol_max_spread_points: dict[str, int] = None  # type: ignore[assignment]
+    # Per-symbol risk multiplier overrides.
+    symbol_risk_multipliers: dict[str, float] = None  # type: ignore[assignment]
     # Feature guard toggles — each controls a specific safety feature.
     trading_enabled: bool = True
     market_entry_tolerance_enabled: bool = True
@@ -81,6 +83,17 @@ class TradingConfig:
                 "XAUUSD": 80, "XAGUSD": 150,
                 "DE40": 500, "US100": 500,
             })
+        if self.symbol_risk_multipliers is None:
+            object.__setattr__(self, 'symbol_risk_multipliers', {
+                "XAUUSD": 3.0,
+            })
+
+    def get_risk_multiplier(self, symbol: str) -> float:
+        """Return the risk multiplier for the given symbol (defaulting to risk_multiplier)."""
+        upper = symbol.upper()
+        if self.symbol_risk_multipliers and upper in self.symbol_risk_multipliers:
+            return self.symbol_risk_multipliers[upper]
+        return self.risk_multiplier
 
     def get_max_spread_points(self, symbol: str) -> int:
         """Return the max spread limit in points for the given symbol."""
@@ -251,6 +264,14 @@ def load_config(config_path: str | Path) -> AppConfig:
     else:
         raise ValueError("trading.symbol_max_spread_points must be a YAML mapping (e.g. DE40: 500)")
 
+    raw_symbol_risks = trading_raw.get("symbol_risk_multipliers")
+    if isinstance(raw_symbol_risks, dict):
+        symbol_risk_multipliers = {str(k).upper(): float(v) for k, v in raw_symbol_risks.items()}
+    elif raw_symbol_risks is None:
+        symbol_risk_multipliers = {"XAUUSD": 3.0}
+    else:
+        raise ValueError("trading.symbol_risk_multipliers must be a YAML mapping (e.g. XAUUSD: 3.0)")
+
     def _guard_bool(key: str, default: bool) -> bool:
         """Load a boolean guard flag, falling back to *default* if absent."""
         value = trading_raw.get(key)
@@ -287,6 +308,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         allowed_symbols=allowed_symbols,
         symbol_aliases=symbol_aliases,
         symbol_max_spread_points=symbol_max_spread_points,
+        symbol_risk_multipliers=symbol_risk_multipliers,
         # Guard toggles: default to True for safety, except where noted.
         trading_enabled=_guard_bool("trading_enabled", True),
         market_entry_tolerance_enabled=_guard_bool("market_entry_tolerance_enabled", True),

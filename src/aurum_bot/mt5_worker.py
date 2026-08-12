@@ -548,9 +548,19 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 if inferred_commission is not None
                 else DEFAULT_COMMISSION_PER_LOT_USD
             )
+        symbol_risks = trading.get("symbol_risk_multipliers") or {}
+        risk_multiplier = float(
+            symbol_risks.get(
+                signal.symbol.upper(),
+                symbol_risks.get(
+                    broker_symbol.upper(),
+                    trading.get("risk_multiplier", 2.0),
+                ),
+            )
+        )
         raw_volume = raw_volume_for_risk(
             risk_base_usd=account.risk_base_usd,
-            risk_percent=RISK_PERCENT_BASE * float(trading["risk_multiplier"]),
+            risk_percent=RISK_PERCENT_BASE * risk_multiplier,
             loss_for_one_lot=abs(float(loss_one_lot)),
             commission_for_one_lot=commission_one_lot,
         )
@@ -577,7 +587,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
 
         volume = volume_for_risk(
             risk_base_usd=account.risk_base_usd,
-            risk_percent=RISK_PERCENT_BASE * float(trading["risk_multiplier"]),
+            risk_percent=RISK_PERCENT_BASE * risk_multiplier,
             loss_for_one_lot=abs(float(loss_one_lot)),
             volume_min=float(symbol_info.volume_min),
             volume_max=float(symbol_info.volume_max),
