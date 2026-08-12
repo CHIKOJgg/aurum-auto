@@ -23,11 +23,17 @@ def _save(path: Path, plan: dict[str, Any]) -> None:
 def _matching(items: tuple[Any, ...] | list[Any], plan: dict[str, Any]) -> list[Any]:
     comment = str(plan["comment"])
     magic = int(plan["magic"])
-    return [
-        item for item in items
-        if int(getattr(item, "magic", -1)) == magic
-        and str(getattr(item, "comment", "")) == comment
-    ]
+    order_ticket = int(plan.get("order_ticket", -1) or -1)
+    results = []
+    for item in items:
+        item_ticket = int(getattr(item, "ticket", -1))
+        item_magic = int(getattr(item, "magic", -1))
+        item_comment = str(getattr(item, "comment", ""))
+        if item_ticket == order_ticket:
+            results.append(item)
+        elif item_magic == magic and (item_comment.startswith(comment[:20]) or comment.startswith(item_comment[:20])):
+            results.append(item)
+    return results
 
 
 def _close_position(mt5: Any, position: Any, symbol_info: Any, deviation: int, volume: float | None = None) -> bool:
