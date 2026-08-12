@@ -27,17 +27,17 @@ def _matching(items: tuple[Any, ...] | list[Any], plan: dict[str, Any]) -> list[
     comment = str(plan["comment"])
     magic = int(plan["magic"])
     order_ticket = int(plan.get("order_ticket", -1) or -1)
+    saved_tickets = [int(t) for t in plan.get("position_tickets", [])]
     results = []
     for item in items:
         item_ticket = int(getattr(item, "ticket", -1))
         item_magic = int(getattr(item, "magic", -1))
         item_comment = str(getattr(item, "comment", ""))
-        if item_ticket == order_ticket:
+        if item_ticket == order_ticket or item_ticket in saved_tickets:
             results.append(item)
         elif item_magic == magic:
-            ic = str(item_comment)
             import re
-            if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+            if re.search(rf"{re.escape(comment)}(?!\d)", item_comment):
                 results.append(item)
     return results
 
@@ -56,17 +56,18 @@ def _close_position(mt5: Any, position: Any, symbol_info: Any, deviation: int, v
     else:
         requested = min(pos_vol, raw_requested)
         requested = math.floor(requested / step + 1e-9) * step
+        if requested < vol_min:
+            return False
         if pos_vol - requested < vol_min:
             requested = pos_vol
-        elif requested + 1e-9 < vol_min:
-            requested = vol_min
         requested = min(requested, pos_vol)
+    vol_digits = max(0, int(round(-math.log10(step)))) if step < 1.0 else 0
     kind = ExecutionKind.MARKET
     base = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": position.symbol,
         "position": int(position.ticket),
-        "volume": round(requested, 10),
+        "volume": round(requested, vol_digits),
         "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
         "price": _normalized(float(tick.bid if is_buy else tick.ask), int(symbol_info.digits)),
         "deviation": deviation,
@@ -145,17 +146,14 @@ def _cancel_order(mt5: Any, order: Any) -> bool:
 
 def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offset_hours: float = 3.0, server_time_mode: str = "auto") -> float | None:
     """Return the most favorable price since the last check."""
-    # When server_time_mode is "auto", calculate offset from the broker's
-    # own server time to handle DST transitions automatically.
     if server_time_mode == "auto":
         tick = mt5.symbol_info_tick(plan["symbol"])
         if tick is not None:
             server_time_sec = int(getattr(tick, "time", 0))
             if server_time_sec > 0:
                 utc_now_sec = now_msc / 1000
-                server_offset_hours = (server_time_sec - utc_now_sec) / 3600
-                # Round to nearest 0.5h to filter jitter.
-                server_offset_hours = round(server_offset_hours * 2) / 2
+                calculated = (server_time_sec - utc_now_sec) / 3600
+                server_offset_hours = round(calculated * 2) / 2
     tick = mt5.symbol_info_tick(plan["symbol"])
     if tick is None:
         return None
@@ -165,14 +163,13 @@ def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offs
     if not start_msc:
         return current
     try:
-        # MT5 copy_ticks_range interprets naive server timestamps.  Keep the
-        # conversion aligned with the backtest collector, then compare returned
-        # prices only (their timestamps are not persisted here).
         offset_seconds = float(server_offset_hours) * 3_600
+        dt_start = datetime.fromtimestamp(max(0, int(start_msc) - 1000) / 1000 + offset_seconds, timezone.utc)
+        dt_end = datetime.fromtimestamp(now_msc / 1000 + offset_seconds, timezone.utc)
         ticks = mt5.copy_ticks_range(
             plan["symbol"],
-            datetime.fromtimestamp(max(0, int(start_msc) - 1000) / 1000 + offset_seconds, timezone.utc),
-            datetime.fromtimestamp(now_msc / 1000 + offset_seconds, timezone.utc),
+            dt_start,
+            dt_end,
             mt5.COPY_TICKS_ALL,
         )
         if ticks is None or len(ticks) == 0:
@@ -181,6 +178,7 @@ def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offs
         return float(max(values) if direction is Direction.LONG else min(values))
     except Exception:
         return current
+
 
 
 def _manage_plan(

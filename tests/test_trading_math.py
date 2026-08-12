@@ -225,14 +225,18 @@ class VolumeTests(unittest.TestCase):
         # $100 risk / $333 per lot = 0.3003..., rounded to 0.30.
         self.assertEqual(volume_for_risk(10_000, 1, 333, 0.01, 100, 0.01), 0.3)
 
-    def test_00187_rounds_to_002(self):
-        self.assertEqual(volume_for_risk(1_000, 1, 534, 0.01, 100, 0.01), 0.02)
+    def test_00187_rounds_down_to_001(self):
+        self.assertEqual(volume_for_risk(1_000, 1, 534, 0.01, 100, 0.01), 0.01)
 
-    def test_0109_rounds_to_011(self):
-        self.assertEqual(volume_for_risk(1_000, 1, 91.743, 0.01, 100, 0.01), 0.11)
+    def test_0109_rounds_down_to_010(self):
+        self.assertEqual(volume_for_risk(1_000, 1, 91.743, 0.01, 100, 0.01), 0.10)
 
-    def test_below_minimum_becomes_001(self):
+    def test_below_minimum_becomes_001_within_overshoot_limit(self):
         self.assertEqual(volume_for_risk(510, 1, 1000, 0.01, 100, 0.01), 0.01)
+
+    def test_excessive_risk_overshoot_below_minimum_returns_none(self):
+        # $100 risk_base, 1% risk = $1.00 target. Loss per lot = $5000. 0.01 lot loses $50 (50x target).
+        self.assertIsNone(volume_for_risk(100, 1, 5000, 0.01, 100, 0.01))
 
     def test_caps_at_maximum(self):
         self.assertEqual(volume_for_risk(100_000, 1, 1, 0.01, 10, 0.01), 10.0)
@@ -240,3 +244,4 @@ class VolumeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

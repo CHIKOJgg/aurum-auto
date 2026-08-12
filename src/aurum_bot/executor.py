@@ -73,14 +73,17 @@ def _run_account(
             account.name, "failed", f"MT5 worker exited {proc.returncode}: {detail}"
         )
     try:
-        raw = json.loads(stdout.strip())
+        lines = [line.strip() for line in stdout.strip().splitlines() if line.strip()]
+        last_json_line = next(line for line in reversed(lines) if line.startswith("{") and line.endswith("}"))
+        raw = json.loads(last_json_line)
         return ExecutionResult(**raw)
-    except (json.JSONDecodeError, TypeError) as exc:
+    except (json.JSONDecodeError, TypeError, StopIteration) as exc:
         return ExecutionResult(
             account.name,
             "failed",
             f"invalid MT5 worker response: {exc}; {stdout!r}",
         )
+
 
 
 def execute_for_accounts(

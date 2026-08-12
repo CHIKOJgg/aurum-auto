@@ -83,8 +83,9 @@ class AccountConfig:
         signal_symbol: str,
         entry_price: float,
         contract_size: float,
+        quote_to_usd_rate: float = 1.0,
     ) -> float:
-        """Return the full commission charged for opening one lot."""
+        """Return the full commission charged for opening one lot in USD."""
         normalized = signal_symbol.upper()
         fixed = self.commission_per_lot_usd or {}
         rates = self.commission_rate_percent or {}
@@ -102,8 +103,10 @@ class AccountConfig:
             * abs(float(contract_size))
             * rate_percent
             / 100
-        )
+        ) * abs(float(quote_to_usd_rate))
         return fixed_amount + notional_amount
+
+
 
     def has_configured_commission(self, signal_symbol: str) -> bool:
         """Return whether config explicitly defines commission for a symbol."""

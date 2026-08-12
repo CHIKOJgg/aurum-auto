@@ -267,6 +267,41 @@ def _prepare_for_new_signal(
     )
 
 
+def _close_position(
+    mt5: Any,
+    position: Any,
+    symbol_info: Any,
+    deviation: int,
+) -> bool:
+    """Emergency close a position when SL/TP fails to attach."""
+    is_buy = int(position.type) == int(mt5.POSITION_TYPE_BUY)
+    tick = mt5.symbol_info_tick(position.symbol)
+    if tick is None:
+        return False
+    requested = float(position.volume)
+    base = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "position": int(position.ticket),
+        "volume": requested,
+        "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
+        "price": _normalized(float(tick.bid if is_buy else tick.ask), int(symbol_info.digits)),
+        "deviation": deviation,
+        "magic": int(position.magic),
+        "comment": "AURUM:emergency_close",
+        "type_time": mt5.ORDER_TIME_GTC,
+    }
+    for filling in _filling_candidates(mt5, symbol_info, ExecutionKind.MARKET):
+        request = dict(base, type_filling=filling)
+        check = mt5.order_check(request)
+        if check is None or int(check.retcode) != 0:
+            continue
+        result = mt5.order_send(request)
+        if result is not None and int(result.retcode) in _success_codes(mt5):
+            return True
+    return False
+
+
 def _pending_order_type(
     mt5: Any,
     direction: Direction,
@@ -325,10 +360,10 @@ def _filling_candidates(
         candidates.append(mt5.ORDER_FILLING_FOK)
     if flags & 2:  # SYMBOL_FILLING_IOC
         candidates.append(mt5.ORDER_FILLING_IOC)
-    if int(symbol_info.trade_exemode) != mt5.SYMBOL_TRADE_EXECUTION_MARKET:
+    if flags & 4 or int(symbol_info.trade_exemode) != mt5.SYMBOL_TRADE_EXECUTION_MARKET:
         candidates.append(mt5.ORDER_FILLING_RETURN)
     if not candidates:
-        candidates.extend([mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK])
+        candidates.extend([mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN])
 
     unique: list[int] = []
     for candidate in candidates:
@@ -350,9 +385,21 @@ def _send_protected_order(
 ) -> tuple[bool, int | None, str, dict[str, int] | None]:
     last_detail = "order was not sent"
     for attempt in range(1, attempts + 1):
+        if attempt > 1 and base_request.get("action") == mt5.TRADE_ACTION_DEAL:
+            refreshed = mt5.symbol_info_tick(symbol)
+            if refreshed is not None:
+                is_buy = int(base_request.get("type", 0)) == int(mt5.ORDER_TYPE_BUY)
+                new_price = float(refreshed.ask) if is_buy else float(refreshed.bid)
+                sl = float(base_request.get("sl", 0.0))
+                tp = float(base_request.get("tp", 0.0))
+                valid_geom = (sl < new_price < tp) if is_buy else (tp < new_price < sl)
+                if valid_geom:
+                    base_request["price"] = _normalized(new_price, int(symbol_info.digits))
+
         existing_ticket = _already_applied(
             mt5, symbol, magic, comment, execution_kind
         )
+
         if existing_ticket is not None:
             return (
                 True,
@@ -1030,13 +1077,22 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
 
         if ticket is not None:
             # Ensure SL and TP are applied on broker server (for Market Execution accounts that strip SL/TP on deal entry)
-            matching_positions = tuple(mt5.positions_get(ticket=ticket) or ())
+            pos_ticket = ticket
+            if hasattr(mt5, "history_deals_get"):
+                try:
+                    deals = mt5.history_deals_get(order=ticket)
+                    if deals and isinstance(deals, (list, tuple)):
+                        pos_ticket = int(getattr(deals[0], "position_id", ticket) or ticket)
+                except Exception:
+                    pass
+            matching_positions = tuple(mt5.positions_get(ticket=pos_ticket) or ())
+
             if not matching_positions:
                 matching_positions = tuple(mt5.positions_get(symbol=broker_symbol) or ())
             for pos in matching_positions:
-                pos_ticket = int(pos.ticket)
+                current_pos_ticket = int(pos.ticket)
                 # Only match the exact position ticket, or fallback to exact comment match for this signal
-                is_exact_match = (pos_ticket == ticket)
+                is_exact_match = (current_pos_ticket == pos_ticket or current_pos_ticket == ticket)
                 if not is_exact_match and int(getattr(pos, "magic", -1)) == magic:
                     ic = str(getattr(pos, "comment", ""))
                     is_exact_match = bool(re.search(rf"{re.escape(comment)}(?!\d)", ic))
@@ -1045,17 +1101,29 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                     float(getattr(pos, "sl", 0.0) or 0.0) == 0.0
                     or float(getattr(pos, "tp", 0.0) or 0.0) == 0.0
                 ):
+                    sltp_ok = False
                     for _retry in range(3):
                         sltp_result = mt5.order_send({
                             "action": mt5.TRADE_ACTION_SLTP,
                             "symbol": broker_symbol,
-                            "position": pos_ticket,
+                            "position": current_pos_ticket,
                             "sl": stop_loss,
                             "tp": take_profit,
                         })
                         if sltp_result and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
+                            sltp_ok = True
                             break
-                        import time; time.sleep(0.1)
+                        time.sleep(0.1)
+                    if not sltp_ok:
+                        _close_position(mt5, pos, symbol_info, int(trading["deviation_points"]))
+                        return ExecutionResult(
+                            account.name,
+                            "failed",
+                            f"emergency position close: could not attach mandatory SL ({stop_loss})",
+                            volume=volume,
+                            execution_kind=execution_kind.value,
+                        )
+
         plan = _build_strategy_plan(
             signal=signal,
             strategy=strategy,

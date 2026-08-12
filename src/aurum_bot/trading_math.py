@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_FLOOR
 
 from .models import Direction, ExecutionKind
 
@@ -82,8 +82,9 @@ def volume_for_risk(
     volume_max: float,
     volume_step: float,
     commission_for_one_lot: float = 0.0,
+    max_risk_overshoot_ratio: float = 2.0,
 ) -> float | None:
-    """Round to the nearest lot step and enforce the broker/configured minimum."""
+    """Round down to lot step and enforce minimum if within safe risk bounds."""
     positive_values = (
         risk_base_usd,
         risk_percent,
@@ -107,8 +108,16 @@ def volume_for_risk(
         return None
     raw = Decimal(str(raw_value))
     step = Decimal(str(volume_step))
-    steps = (raw / step).to_integral_value(rounding=ROUND_HALF_UP)
+    vol_min_dec = Decimal(str(volume_min))
+    steps = (raw / step).to_integral_value(rounding=ROUND_FLOOR)
     rounded = steps * step
-    rounded = max(rounded, Decimal(str(volume_min)))
+    if rounded < vol_min_dec:
+        total_loss_per_lot = Decimal(str(loss_for_one_lot + commission_for_one_lot))
+        actual_risk_at_min = vol_min_dec * total_loss_per_lot
+        target_risk = Decimal(str(risk_base_usd)) * Decimal(str(risk_percent)) / Decimal("100")
+        if actual_risk_at_min > target_risk * Decimal(str(max_risk_overshoot_ratio)):
+            return None
+        rounded = vol_min_dec
     rounded = min(rounded, Decimal(str(volume_max)))
     return float(rounded)
+

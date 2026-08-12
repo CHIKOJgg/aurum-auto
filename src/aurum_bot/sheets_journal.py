@@ -684,7 +684,8 @@ class SheetsTradeJournal:
         if not value:
             return ""
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.astimezone().strftime("%d.%m.%Y %H:%M:%S")
+        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
 
     def _upsert_snapshots(self, snapshots: Iterable[TradeSnapshot]) -> int:
         filtered = [

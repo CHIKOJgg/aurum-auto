@@ -271,5 +271,17 @@ class PendingOrderTypeTests(unittest.TestCase):
         )
 
 
+class ClosePositionTests(unittest.TestCase):
+    def test_emergency_close_position_success(self):
+        from aurum_bot.mt5_worker import _close_position
+        mt5 = FakeNettingMt5()
+        pos = SimpleNamespace(type=0, symbol="XAUUSD", ticket=123, volume=0.1, magic=777)
+        symbol_info = SimpleNamespace(digits=2, filling_mode=1, trade_exemode=2)
+        res = _close_position(mt5, pos, symbol_info, 10)
+        self.assertTrue(res)
+        self.assertEqual(len(mt5.requests), 1)
+        self.assertEqual(mt5.requests[0]["comment"], "AURUM:emergency_close")
+
+
 if __name__ == "__main__":
     unittest.main()

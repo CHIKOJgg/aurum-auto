@@ -20,14 +20,13 @@ HEADER_RE = re.compile(
     r"(?im)^\s*#(?P<symbol>[A-Z0-9._-]+)\s+(?P<direction>LONG|SHORT)\b"
 )
 ENTRY_RE = re.compile(
-    r"(?im)^\s*🔸?\s*Вход\s+сейчас\s+или\s+(?P<price>\d+(?:[.,]\d+)?)\s*$"
+    r"(?im)^\s*[*_🔸]?\s*Вход(?:\s+сейчас)?(?:\s+(?:или|:|@))?\s*(?P<price>\d+(?:[.,]\d+)?)"
 )
 SL_RE = re.compile(
-    r"(?im)^\s*🛑?\s*SL\s+(?P<price>\d+(?:[.,]\d+)?)\s*$"
+    r"(?im)^\s*[*_🛑]?\s*SL\s*[:\-=]?\s*(?P<price>\d+(?:[.,]\d+)?)"
 )
 TP_RE = re.compile(
-    r"(?im)^\s*(?:\S+\s*)?TP\s*(?P<number>[1-4])\s+"
-    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
+    r"(?im)^\s*(?:\S+\s*)?TP\s*(?P<number>[1-4])\s*[:\-=]?\s*(?P<price>\d+(?:[.,]\d+)?)"
 )
 
 
@@ -88,15 +87,22 @@ def parse_signal(
     stop_loss = _price(sl_match)
     take_profit = float(tp_match)
 
+    if set(take_profits) != {1, 2, 3, 4}:
+        return None
+
     if direction is Direction.LONG:
-        valid_geometry = stop_loss < entry < take_profit
+        valid_geometry = (
+            stop_loss < entry < take_profit
+            and take_profits[1] < take_profits[2] < take_profits[3] < take_profits[4]
+        )
     else:
-        valid_geometry = take_profit < entry < stop_loss
+        valid_geometry = (
+            take_profit < entry < stop_loss
+            and take_profits[1] > take_profits[2] > take_profits[3] > take_profits[4]
+        )
     if not valid_geometry:
         return None
 
-    if set(take_profits) != {1, 2, 3, 4}:
-        return None
 
     return Signal(
         message_id=message_id,

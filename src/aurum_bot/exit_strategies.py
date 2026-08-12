@@ -89,6 +89,9 @@ def get_strategy(key: str) -> StrategySpec:
         raise ValueError(f"Unknown exit strategy {key!r}. Allowed: {allowed}") from exc
 
 
+import time
+
+
 def effective_target(
     strategy: StrategySpec,
     *,
@@ -105,10 +108,11 @@ def effective_target(
         return selected if symbol in {"XAUUSD", "DE40", "US100"} else other
     if strategy.session_target_numbers is not None:
         active, other = strategy.session_target_numbers
-        timestamp = (published_at_ms or 0) / 1000
+        timestamp = (published_at_ms / 1000) if published_at_ms else time.time()
         hour = datetime.fromtimestamp(timestamp, timezone.utc).hour
         return active if strategy.session_start_hour_utc <= hour < strategy.session_end_hour_utc else other
     return take_profit_target if take_profit_target is not None else strategy.target_number
+
 
 
 def executable_legs(

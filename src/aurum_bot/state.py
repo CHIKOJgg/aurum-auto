@@ -134,4 +134,12 @@ class StateStore:
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         payload = json.dumps(self.data, ensure_ascii=False, indent=2, sort_keys=True)
         temporary.write_text(payload, encoding="utf-8")
-        os.replace(temporary, self.path)
+        for attempt in range(5):
+            try:
+                os.replace(temporary, self.path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05)
+

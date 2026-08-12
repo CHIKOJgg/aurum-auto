@@ -104,8 +104,6 @@ async def handle_message(
     received_monotonic_ns = received_monotonic_ns or time.monotonic_ns()
     published_at_ms = int(message.date.timestamp() * 1000)
     message_id = int(message.id)
-    # Claim durably before any external trading action. This is at-most-once by design.
-    state.mark(message_id, "claimed")
     signal = parse_signal(
         message_id,
         message.raw_text,
@@ -125,6 +123,9 @@ async def handle_message(
             config.trading.exit_strategy,
         )
         return
+
+    # Claim durably with signal payload attached before external action.
+    state.mark(message_id, "claimed", signal=signal.to_dict())
 
     has_image = message_has_image(message)
     historical_signal = parse_historical_signal(
@@ -324,6 +325,7 @@ async def _journal_write_worker(
 async def _journal_sync_loop(
     journal: SheetsTradeJournal,
     config: AppConfig,
+    mt5_lock: asyncio.Lock | None = None,
 ) -> None:
     account = next(
         item
@@ -332,12 +334,21 @@ async def _journal_sync_loop(
     )
     while True:
         try:
-            snapshots = await asyncio.to_thread(
-                collect_trade_snapshots,
-                account,
-                magic_number=config.trading.magic_number,
-                lookback_days=config.google_sheets.history_lookback_days,
-            )
+            if mt5_lock is not None:
+                async with mt5_lock:
+                    snapshots = await asyncio.to_thread(
+                        collect_trade_snapshots,
+                        account,
+                        magic_number=config.trading.magic_number,
+                        lookback_days=config.google_sheets.history_lookback_days,
+                    )
+            else:
+                snapshots = await asyncio.to_thread(
+                    collect_trade_snapshots,
+                    account,
+                    magic_number=config.trading.magic_number,
+                    lookback_days=config.google_sheets.history_lookback_days,
+                )
             updated = await asyncio.to_thread(
                 journal.upsert_snapshots,
                 snapshots,
@@ -354,6 +365,7 @@ async def _journal_sync_loop(
                 "Google Sheets/MT5 history sync failed; trading is unaffected"
             )
         await asyncio.sleep(config.google_sheets.sync_interval_seconds)
+
 
 
 def _any_active_plans(accounts: tuple[AccountConfig, ...], strategy_state_dir: Path) -> bool:
@@ -447,7 +459,8 @@ async def run(config: AppConfig) -> None:
                 asyncio.create_task(
                     _journal_write_worker(journal_queue, journal)
                 ),
-                asyncio.create_task(_journal_sync_loop(journal, config)),
+                asyncio.create_task(_journal_sync_loop(journal, config, mt5_lock)),
+
             ])
             LOGGER.info(
                 "Google Sheets journal enabled for account %s",
