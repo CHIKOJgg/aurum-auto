@@ -153,8 +153,12 @@ def _manage_plan(
     if plan.get("status") != "active":
         return
     symbol = str(plan["symbol"])
-    positions = _matching(list(mt5.positions_get(symbol=symbol) or ()), plan)
-    orders = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
+    raw_positions = mt5.positions_get(symbol=symbol)
+    raw_orders = mt5.orders_get(symbol=symbol)
+    if raw_positions is None and raw_orders is None:
+        return
+    positions = _matching(list(raw_positions or ()), plan)
+    orders = _matching(list(raw_orders or ()), plan)
     if not positions:
         if orders:
             if pending_timeout_enabled and pending_timeout_minutes > 0:
