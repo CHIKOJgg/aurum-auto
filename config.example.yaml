@@ -21,14 +21,15 @@ trading:
   exit_strategy: "sl_tp2"
   # Legacy/default target used by parsers and reports.
   take_profit_target: 2
-  # true: always place an exact-TVH pending order (limit/stop), never enter at market.
-  strict_call_entry: true
+  # ENTRY MODE SELECTION:
+  # true  = PENDING LIMIT/STOP MODE: Always places a pending limit/stop order at exact signal entry price. Never enters at market.
+  # false = AUTO MARKET/LIMIT MODE: Enters at market if quote is near entry price, otherwise places a pending limit order.
+  strict_call_entry: false
   # false: archive calls without an image; true: also execute them in MT5.
   enable_indicator_2: false
   # Enter at market only while stop risk is within the inclusive 0.9R-1.1R range.
   min_market_risk_multiplier: 0.9
   max_market_risk_multiplier: 1.1
-  # Also enter at market when the quote is within this fraction of the stop
   # distance (R) from the call entry, even if risk slightly exceeds the band
   # (e.g. after lot rounding). 0 = disabled.
   # Also enter at market when the quote is within this fraction of the stop
