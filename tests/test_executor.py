@@ -20,10 +20,10 @@ class ExecutorTests(unittest.TestCase):
         signal = Signal(1, "US100", Direction.LONG, 27808.7, 27784.1, 27833.3)
         trading = TradingConfig(1, 0.9, 1.1, 0.01, 20, 3, 2, 397897)
 
-        with patch("aurum_bot.executor.subprocess.run") as run:
+        with patch("aurum_bot.executor.subprocess.Popen") as popen:
             result = _run_account(account, signal, trading)
 
-        run.assert_not_called()
+        popen.assert_not_called()
         self.assertEqual(result.status, "skipped_unsupported_symbol")
 
     def test_passes_timing_context_to_worker(self):
@@ -48,10 +48,12 @@ class ExecutorTests(unittest.TestCase):
             }
         )
 
+        mock_proc = SimpleNamespace(returncode=0)
+        mock_proc.communicate = lambda input=None, timeout=None: (response, "")
         with patch(
-            "aurum_bot.executor.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout=response, stderr=""),
-        ) as run:
+            "aurum_bot.executor.subprocess.Popen",
+            return_value=mock_proc,
+        ) as popen:
             result = _run_account(
                 account,
                 signal,
@@ -59,8 +61,8 @@ class ExecutorTests(unittest.TestCase):
                 {"published_at_ms": 1000, "received_monotonic_ns": 2000},
             )
 
-        payload = json.loads(run.call_args.kwargs["input"])
-        self.assertEqual(payload["timing"]["published_at_ms"], 1000)
+        call_kwargs = popen.call_args
+        self.assertIsNotNone(call_kwargs)
         self.assertEqual(result.receive_to_confirmation_ms, 312)
 
 

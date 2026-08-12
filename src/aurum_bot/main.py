@@ -110,6 +110,8 @@ async def handle_message(
         message_id,
         message.raw_text,
         take_profit_target=get_strategy(config.trading.exit_strategy).target_number,
+        allowed_symbols=config.trading.allowed_symbols,
+        symbol_aliases=config.trading.symbol_aliases,
     )
     if signal is None:
         state.mark(message_id, "ignored_not_entry_call")
@@ -387,7 +389,7 @@ async def _status_writer(config: AppConfig, started_at: float) -> None:
                 encoding="utf-8",
             )
         except Exception:
-            pass
+            LOGGER.warning("status.json write failed", exc_info=True)
         await asyncio.sleep(config.runtime.status_write_interval_seconds)
 
 
@@ -403,7 +405,7 @@ async def run(config: AppConfig) -> None:
     async def strategy_manager_loop() -> None:
         while True:
             try:
-                if not _any_active_plans(config.accounts, config.paths.strategy_state_dir):
+                if not await asyncio.to_thread(_any_active_plans, config.accounts, config.paths.strategy_state_dir):
                     await asyncio.sleep(config.runtime.exit_strategy_poll_seconds)
                     continue
                 async with mt5_lock:
@@ -462,7 +464,15 @@ async def run(config: AppConfig) -> None:
         connection_retries=3,
         flood_sleep_threshold=60,
     )
-    await client.start(phone=config.telegram.phone)
+    # Prevent the bot from hanging in headless mode when Telegram needs
+    # interactive authentication (2FA code, phone verification, etc.).
+    await client.connect()
+    if not await client.is_user_authorized():
+        await client.disconnect()
+        raise RuntimeError(
+            "Telegram session is not authorized. Run the bot interactively "
+            "once to complete login, then restart in headless mode."
+        )
     notification_queue: asyncio.Queue[str] | None = None
     notification_task: asyncio.Task[None] | None = None
     if config.telegram.notifications_enabled:
@@ -594,6 +604,7 @@ def main() -> None:
     except KeyboardInterrupt:
         LOGGER.info("Stopped by user")
     except Exception as exc:
+        # Fallback logger if configure_logging() was not reached.
         logging.basicConfig(level=logging.ERROR)
         LOGGER.exception("Fatal error: %s", exc)
         sys.exit(1)

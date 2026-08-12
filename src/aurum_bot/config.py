@@ -49,8 +49,30 @@ class TradingConfig:
     news_window_before_minutes: float = 0.0
     news_window_after_minutes: float = 0.0
     mt5_server_offset_hours: float = 3.0
+    # "fixed" uses mt5_server_offset_hours; "auto" detects offset from MT5.
+    server_time_mode: str = "auto"
     close_spread_hard_cap_minutes: float = 10.0
     execution_timeout_seconds: int = 90
+    default_commission_per_lot_usd: float = 7.0
+    # Instruments recognized by the parser (beyond automatic FX pair detection).
+    allowed_symbols: frozenset[str] = frozenset({"XAUUSD", "XAGUSD", "DE40", "US100"})
+    # Signal name aliases → canonical symbol names.
+    symbol_aliases: dict[str, str] = None  # type: ignore[assignment]
+    # Feature guard toggles — each controls a specific safety feature.
+    trading_enabled: bool = True
+    market_entry_tolerance_enabled: bool = True
+    pending_timeout_enabled: bool = True
+    entry_spread_guard_enabled: bool = True
+    news_guard_enabled: bool = True
+    margin_guard_enabled: bool = True
+    exit_spread_guard_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if self.symbol_aliases is None:
+            object.__setattr__(self, 'symbol_aliases', {
+                "GOLD": "XAUUSD", "SILVER": "XAGUSD",
+                "GERMANY40": "DE40", "USNDAQ100": "US100",
+            })
 
     @property
     def risk_percent(self) -> float:
@@ -140,6 +162,13 @@ def _required(mapping: dict[str, Any], key: str, section: str) -> Any:
     return mapping[key]
 
 
+def _bool(mapping: dict[str, Any], key: str, section: str) -> bool:
+    value = _required(mapping, key, section)
+    if not isinstance(value, bool):
+        raise ValueError(f"{section}.{key} must be YAML true or false (without quotes)")
+    return value
+
+
 def load_config(config_path: str | Path) -> AppConfig:
     path = Path(config_path).resolve()
     root = path.parent
@@ -176,9 +205,34 @@ def load_config(config_path: str | Path) -> AppConfig:
         channel_title=str(telegram_raw["channel_title"]),
         poll_interval_seconds=max(20, int(telegram_raw["poll_interval_seconds"])),
         session_file=_resolve(root, str(telegram_raw["session_file"])),
-        notifications_enabled=bool(_required(telegram_raw, "notifications_enabled", "telegram")),
+        notifications_enabled=_bool(telegram_raw, "notifications_enabled", "telegram"),
         notification_retry_count=max(0, int(_required(telegram_raw, "notification_retry_count", "telegram"))),
     )
+    # Parse allowed symbols and aliases from YAML (with backwards-compatible defaults).
+    raw_allowed = trading_raw.get("allowed_symbols")
+    if isinstance(raw_allowed, list):
+        allowed_symbols = frozenset(str(s).upper() for s in raw_allowed)
+    elif raw_allowed is None:
+        allowed_symbols = frozenset({"XAUUSD", "XAGUSD", "DE40", "US100"})
+    else:
+        raise ValueError("trading.allowed_symbols must be a YAML list (use '- XAUUSD' syntax)")
+    raw_aliases = trading_raw.get("symbol_aliases")
+    if isinstance(raw_aliases, dict):
+        symbol_aliases = {str(k).upper(): str(v).upper() for k, v in raw_aliases.items()}
+    elif raw_aliases is None:
+        symbol_aliases = {"GOLD": "XAUUSD", "SILVER": "XAGUSD", "GERMANY40": "DE40", "USNDAQ100": "US100"}
+    else:
+        raise ValueError("trading.symbol_aliases must be a YAML mapping (use 'GOLD: XAUUSD' syntax)")
+
+    def _guard_bool(key: str, default: bool) -> bool:
+        """Load a boolean guard flag, falling back to *default* if absent."""
+        value = trading_raw.get(key)
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            raise ValueError(f"trading.{key} must be YAML true or false (without quotes)")
+        return value
+
     trading = TradingConfig(
         risk_multiplier=float(_required(trading_raw, "risk_multiplier", "trading")),
         min_market_risk_multiplier=float(_required(trading_raw, "min_market_risk_multiplier", "trading")),
@@ -199,8 +253,20 @@ def load_config(config_path: str | Path) -> AppConfig:
         news_window_before_minutes=float(_required(trading_raw, "news_window_before_minutes", "trading")),
         news_window_after_minutes=float(_required(trading_raw, "news_window_after_minutes", "trading")),
         mt5_server_offset_hours=float(_required(trading_raw, "mt5_server_offset_hours", "trading")),
+        server_time_mode=str(trading_raw.get("server_time_mode", "auto")).strip().lower(),
         close_spread_hard_cap_minutes=float(_required(trading_raw, "close_spread_hard_cap_minutes", "trading")),
         execution_timeout_seconds=max(1, int(_required(trading_raw, "execution_timeout_seconds", "trading"))),
+        default_commission_per_lot_usd=max(0.0, float(trading_raw.get("default_commission_per_lot_usd", 7.0))),
+        allowed_symbols=allowed_symbols,
+        symbol_aliases=symbol_aliases,
+        # Guard toggles: default to True for safety, except where noted.
+        trading_enabled=_guard_bool("trading_enabled", True),
+        market_entry_tolerance_enabled=_guard_bool("market_entry_tolerance_enabled", True),
+        pending_timeout_enabled=_guard_bool("pending_timeout_enabled", True),
+        entry_spread_guard_enabled=_guard_bool("entry_spread_guard_enabled", True),
+        news_guard_enabled=_guard_bool("news_guard_enabled", True),
+        margin_guard_enabled=_guard_bool("margin_guard_enabled", True),
+        exit_spread_guard_enabled=_guard_bool("exit_spread_guard_enabled", True),
     )
     if not 0 < trading.risk_multiplier <= 100:
         raise ValueError("trading.risk_multiplier must be > 0 and <= 100")
@@ -224,10 +290,10 @@ def load_config(config_path: str | Path) -> AppConfig:
         raise ValueError("trading.take_profit_target must be an integer from 1 to 4")
     get_strategy(trading.exit_strategy)
     runtime = RuntimeConfig(
-        reconcile_on_startup=bool(_required(runtime_raw, "reconcile_on_startup", "runtime")),
-        exit_strategy_manager_enabled=bool(_required(runtime_raw, "exit_strategy_manager_enabled", "runtime")),
+        reconcile_on_startup=_bool(runtime_raw, "reconcile_on_startup", "runtime"),
+        exit_strategy_manager_enabled=_bool(runtime_raw, "exit_strategy_manager_enabled", "runtime"),
         exit_strategy_poll_seconds=max(0.1, float(_required(runtime_raw, "exit_strategy_poll_seconds", "runtime"))),
-        status_writer_enabled=bool(_required(runtime_raw, "status_writer_enabled", "runtime")),
+        status_writer_enabled=_bool(runtime_raw, "status_writer_enabled", "runtime"),
         status_write_interval_seconds=max(1.0, float(_required(runtime_raw, "status_write_interval_seconds", "runtime"))),
     )
 

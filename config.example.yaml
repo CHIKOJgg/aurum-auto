@@ -10,6 +10,8 @@ telegram:
   notification_retry_count: 1
 
 trading:
+  # Master switch: false archives signals without sending any MT5 orders.
+  trading_enabled: true
   # Code base is exactly 1%. This YAML value only multiplies it.
   risk_multiplier: 1.0
   # Select one of the strategy IDs documented in README.md.
@@ -27,27 +29,49 @@ trading:
   # distance (R) from the call entry, even if risk slightly exceeds the band
   # (e.g. after lot rounding). 0 = disabled.
   market_entry_tolerance_r: 0.25
+  market_entry_tolerance_enabled: true
   # Cancel a pending order that has not been filled within this many minutes
   # after placement. 0 = keep pending orders forever.
   pending_timeout_minutes: 15
+  pending_timeout_enabled: true
   # Skip entry when the current spread exceeds this many points. 0 = disabled.
   max_spread_points: 50
+  entry_spread_guard_enabled: true
   mt5_server_offset_hours: 3
   close_spread_hard_cap_minutes: 10
+  exit_spread_guard_enabled: true
   # Hard timeout for every isolated MT5 execution subprocess.
   execution_timeout_seconds: 90
+  # "fixed" uses mt5_server_offset_hours; "auto" detects offset from MT5.
+  server_time_mode: "auto"
   # Skip entries inside news windows. Events are listed in news_events_file
   # as [{start_utc: "YYYY-MM-DDTHH:MM", title: "..."}]; windows before/after in
   # minutes. Both windows 0 = news filter disabled.
   news_events_file: "runtime/news_events.json"
   news_window_before_minutes: 10
   news_window_after_minutes: 15
+  news_guard_enabled: true
+  margin_guard_enabled: true
   # Round to the nearest hundredth and never request less than 0.01 lot.
   lot_step: 0.01
   deviation_points: 20
   send_attempts: 3
   retry_delay_seconds: 2
   magic_number: 397897
+  default_commission_per_lot_usd: 7.0
+  # Instruments recognized by the signal parser. FX pairs (6-letter codes)
+  # are always accepted regardless of this list.
+  allowed_symbols:
+    - XAUUSD
+    - XAGUSD
+    - DE40
+    - US100
+  # Alias mapping: signal names → canonical symbol names.
+  symbol_aliases:
+    GOLD: XAUUSD
+    SILVER: XAGUSD
+    GERMANY40: DE40
+    USNDAQ100: US100
   # Pending limits remain GTC after price reaches or crosses SL/TP.
 
 accounts:

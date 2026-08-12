@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> str:
@@ -29,12 +33,23 @@ class StateStore:
         )
 
     def _load_path(self, path: Path) -> dict[str, Any]:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if int(loaded.get("channel_id", 0)) != self.channel_id:
-            raise ValueError(f"State channel_id mismatch in {path}")
-        if not isinstance(loaded.get("messages"), dict):
-            raise ValueError(f"State messages field is invalid in {path}")
-        return loaded
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if int(loaded.get("channel_id", 0)) != self.channel_id:
+                raise ValueError(f"State channel_id mismatch in {path}")
+            if not isinstance(loaded.get("messages"), dict):
+                raise ValueError(f"State messages field is invalid in {path}")
+            return loaded
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("State file %s is corrupted: %s. Starting with clean state.", path, exc)
+            corrupted_path = path.parent / f"{path.name}.corrupted.{int(time.time())}"
+            path.rename(corrupted_path)
+            return {
+                "version": 1,
+                "channel_id": self.channel_id,
+                "last_seen_message_id": 0,
+                "messages": {},
+            }
 
     def load(self) -> None:
         if not self.base_path.exists():
@@ -44,13 +59,18 @@ class StateStore:
                 self.data = self._load_path(scoped_path)
             return
 
-        base_loaded = json.loads(self.base_path.read_text(encoding="utf-8"))
-        if int(base_loaded.get("channel_id", 0)) == self.channel_id:
-            if not isinstance(base_loaded.get("messages"), dict):
-                raise ValueError("State messages field is invalid")
-            self.path = self.base_path
-            self.data = base_loaded
-            return
+        try:
+            base_loaded = json.loads(self.base_path.read_text(encoding="utf-8"))
+            if int(base_loaded.get("channel_id", 0)) == self.channel_id:
+                if not isinstance(base_loaded.get("messages"), dict):
+                    raise ValueError("State messages field is invalid")
+                self.path = self.base_path
+                self.data = base_loaded
+                return
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("Base state file %s is corrupted: %s", self.base_path, exc)
+            corrupted_path = self.base_path.parent / f"{self.base_path.name}.corrupted.{int(time.time())}"
+            self.base_path.rename(corrupted_path)
 
         # Preserve the original channel state and transparently isolate every
         # test/alternate channel in its own file.

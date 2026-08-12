@@ -13,6 +13,7 @@ def collect_trade_snapshots(
     *,
     magic_number: int,
     lookback_days: int,
+    timeout: int = 90,
 ) -> list[TradeSnapshot]:
     payload = {
         "account": account.to_dict(),
@@ -24,7 +25,7 @@ def collect_trade_snapshots(
         input=json.dumps(payload),
         text=True,
         capture_output=True,
-        timeout=90,
+        timeout=timeout,
         check=False,
     )
     if completed.returncode != 0:

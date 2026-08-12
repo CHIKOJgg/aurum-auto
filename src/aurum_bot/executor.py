@@ -25,10 +25,14 @@ def _run_account(
             "skipped_unsupported_symbol",
             f"{signal.symbol} is not enabled for this account",
         )
+    trading_dict = asdict(trading)
+    # frozenset is not JSON-serializable; convert to list for subprocess IPC.
+    if isinstance(trading_dict.get("allowed_symbols"), frozenset):
+        trading_dict["allowed_symbols"] = sorted(trading_dict["allowed_symbols"])
     payload = {
         "account": account.to_dict(),
         "signal": signal.to_dict(),
-        "trading": asdict(trading),
+        "trading": trading_dict,
     }
     if timing is not None:
         payload["timing"] = timing
@@ -37,33 +41,43 @@ def _run_account(
     if reconcile:
         payload["reconcile"] = True
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "aurum_bot.mt5_worker"],
-            input=json.dumps(payload),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
-            timeout=trading.execution_timeout_seconds,
-            check=False,
         )
-    except subprocess.TimeoutExpired:
+        try:
+            stdout, stderr = proc.communicate(
+                input=json.dumps(payload),
+                timeout=trading.execution_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return ExecutionResult(
+                account.name, "failed",
+                f"MT5 worker timed out after {trading.execution_timeout_seconds}s",
+            )
+    except OSError as exc:
         return ExecutionResult(
-            account.name, "failed",
-            f"MT5 worker timed out after {trading.execution_timeout_seconds}s",
+            account.name, "failed", f"MT5 worker failed to start: {exc}",
         )
 
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
+    if proc.returncode != 0:
+        detail = (stderr or stdout).strip()
         return ExecutionResult(
-            account.name, "failed", f"MT5 worker exited {completed.returncode}: {detail}"
+            account.name, "failed", f"MT5 worker exited {proc.returncode}: {detail}"
         )
     try:
-        raw = json.loads(completed.stdout.strip())
+        raw = json.loads(stdout.strip())
         return ExecutionResult(**raw)
     except (json.JSONDecodeError, TypeError) as exc:
         return ExecutionResult(
             account.name,
             "failed",
-            f"invalid MT5 worker response: {exc}; {completed.stdout!r}",
+            f"invalid MT5 worker response: {exc}; {stdout!r}",
         )
 
 
@@ -108,28 +122,41 @@ def manage_exit_strategies(
             "pending_timeout_minutes": trading.pending_timeout_minutes,
             "max_spread_points": trading.max_spread_points,
             "mt5_server_offset_hours": trading.mt5_server_offset_hours,
+            "server_time_mode": trading.server_time_mode,
             "close_spread_hard_cap_minutes": trading.close_spread_hard_cap_minutes,
+            "pending_timeout_enabled": trading.pending_timeout_enabled,
+            "exit_spread_guard_enabled": trading.exit_spread_guard_enabled,
         }
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 [sys.executable, "-m", "aurum_bot.strategy_manager"],
-                input=json.dumps(payload),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                capture_output=True,
-                timeout=trading.execution_timeout_seconds,
-                check=False,
             )
-        except subprocess.TimeoutExpired:
-            errors.append(
-                f"{account.name}: strategy_manager timed out after "
-                f"{trading.execution_timeout_seconds}s"
-            )
+            try:
+                stdout, stderr = proc.communicate(
+                    input=json.dumps(payload),
+                    timeout=trading.execution_timeout_seconds,
+                )
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                errors.append(
+                    f"{account.name}: strategy_manager timed out after "
+                    f"{trading.execution_timeout_seconds}s"
+                )
+                continue
+        except OSError as exc:
+            errors.append(f"{account.name}: strategy_manager failed to start: {exc}")
             continue
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()
+
+        if proc.returncode != 0:
+            detail = (stderr or stdout).strip()
             errors.append(
-                f"{account.name}: exit_code={completed.returncode} "
+                f"{account.name}: exit_code={proc.returncode} "
                 f"detail={detail or '<empty>'} "
-                f"stdout={completed.stdout.strip()[:200] or '<empty>'}"
+                f"stdout={stdout.strip()[:200] or '<empty>'}"
             )
     return errors

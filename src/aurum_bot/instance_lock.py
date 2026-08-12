@@ -42,9 +42,12 @@ class InstanceLock:
                 self.handle.seek(0)
                 msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
             except (ImportError, OSError):
-                import fcntl
+                try:
+                    import fcntl
 
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+                except (ImportError, OSError):
+                    pass  # Best-effort unlock; handle.close() releases the lock.
         finally:
             self.handle.close()
             self.handle = None

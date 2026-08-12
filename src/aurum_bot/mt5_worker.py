@@ -408,11 +408,22 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "algorithmic trading is disabled in MT5/account",
             )
 
+        # Master trading switch: skip execution when disabled.
+        if not bool(trading.get("trading_enabled", True)):
+            return ExecutionResult(
+                account.name,
+                "skipped_disabled",
+                "trading_enabled is false in config",
+            )
+
+        # Fix operator precedence so news window doesn't wrongly block reconcile operations
         if (
-            not bool(payload.get("reconcile", False))
-            and
-            float(trading.get("news_window_before_minutes", 0.0)) > 0
-            or float(trading.get("news_window_after_minutes", 0.0)) > 0
+            bool(trading.get("news_guard_enabled", True))
+            and not bool(payload.get("reconcile", False))
+            and (
+                float(trading.get("news_window_before_minutes", 0.0)) > 0
+                or float(trading.get("news_window_after_minutes", 0.0)) > 0
+            )
         ):
             events = load_news_events(
                 Path(str(trading.get("news_events_file", "")))
@@ -459,7 +470,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                     account.name, "executed", "executed_existing", ticket=int(item.ticket)
                 )
         max_spread_points = int(trading.get("max_spread_points", 0))
-        if not spread_allowed(
+        if bool(trading.get("entry_spread_guard_enabled", True)) and not spread_allowed(
             float(tick.ask),
             float(tick.bid),
             max_spread_points=max_spread_points,
@@ -608,7 +619,8 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             trading.get("market_entry_tolerance_r", 0.0)
         )
         price_within_tolerance = (
-            market_entry_tolerance_r > 0
+            bool(trading.get("market_entry_tolerance_enabled", True))
+            and market_entry_tolerance_r > 0
             and abs(executable_price - entry)
             <= market_entry_tolerance_r * abs(entry - stop_loss) + 1e-9
             and valid_market_geometry
@@ -661,7 +673,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             volume,
             margin_price,
         )
-        if not margin_allowed(
+        if bool(trading.get("margin_guard_enabled", True)) and not margin_allowed(
             float(margin_required) if margin_required is not None else None,
             float(getattr(account_info, "margin_free", None) or 0.0),
         ):

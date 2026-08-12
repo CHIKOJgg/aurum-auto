@@ -6,12 +6,14 @@ from .models import Direction, Signal
 
 
 ALLOWED_SYMBOLS = frozenset({"XAUUSD", "XAGUSD", "DE40", "US100"})
-SIGNAL_SYMBOL_ALIASES = {
+SIGNAL_SYMBOL_ALIASES: dict[str, str] = {
     "GOLD": "XAUUSD",
     "SILVER": "XAGUSD",
     "GERMANY40": "DE40",
     "USNDAQ100": "US100",
 }
+# Module-level defaults are kept for CLI tools and tests.
+# Live bot passes config-driven values via function parameters.
 FOREX_SYMBOL_RE = re.compile(r"^[A-Z]{6}$")
 
 HEADER_RE = re.compile(
@@ -33,21 +35,32 @@ def _price(match: re.Match[str]) -> float:
     return float(match.group("price").replace(",", "."))
 
 
-def normalize_signal_symbol(symbol: str) -> str:
+def normalize_signal_symbol(
+    symbol: str,
+    aliases: dict[str, str] | None = None,
+) -> str:
     normalized = symbol.upper()
-    return SIGNAL_SYMBOL_ALIASES.get(normalized, normalized)
+    mapping = aliases if aliases is not None else SIGNAL_SYMBOL_ALIASES
+    return mapping.get(normalized, normalized)
 
 
-def is_supported_symbol(symbol: str) -> bool:
-    """Accept configured legacy instruments and six-letter FX pairs."""
-    normalized = normalize_signal_symbol(symbol)
-    return normalized in ALLOWED_SYMBOLS or FOREX_SYMBOL_RE.fullmatch(normalized) is not None
+def is_supported_symbol(
+    symbol: str,
+    allowed: frozenset[str] | None = None,
+    aliases: dict[str, str] | None = None,
+) -> bool:
+    """Accept configured instruments and six-letter FX pairs."""
+    normalized = normalize_signal_symbol(symbol, aliases)
+    allowed_set = allowed if allowed is not None else ALLOWED_SYMBOLS
+    return normalized in allowed_set or FOREX_SYMBOL_RE.fullmatch(normalized) is not None
 
 
 def parse_signal(
     message_id: int,
     text: str | None,
     take_profit_target: int = 2,
+    allowed_symbols: frozenset[str] | None = None,
+    symbol_aliases: dict[str, str] | None = None,
 ) -> Signal | None:
     """Parse a strict entry call; status/TP/SL posts intentionally return None."""
     if take_profit_target not in {1, 2, 3, 4}:
@@ -66,9 +79,9 @@ def parse_signal(
         return None
 
     raw_symbol = header.group("symbol").upper()
-    if not is_supported_symbol(raw_symbol):
+    if not is_supported_symbol(raw_symbol, allowed_symbols, symbol_aliases):
         return None
-    symbol = normalize_signal_symbol(raw_symbol)
+    symbol = normalize_signal_symbol(raw_symbol, symbol_aliases)
 
     direction = Direction(header.group("direction").upper())
     entry = _price(entry_match)

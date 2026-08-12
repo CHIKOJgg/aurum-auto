@@ -90,7 +90,19 @@ def _cancel_order(mt5: Any, order: Any) -> bool:
     return int(result.retcode) in accepted
 
 
-def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offset_hours: float = 3.0) -> float | None:
+def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offset_hours: float = 3.0, server_time_mode: str = "auto") -> float | None:
+    """Return the most favorable price since the last check."""
+    # When server_time_mode is "auto", calculate offset from the broker's
+    # own server time to handle DST transitions automatically.
+    if server_time_mode == "auto":
+        tick = mt5.symbol_info_tick(plan["symbol"])
+        if tick is not None:
+            server_time_sec = int(getattr(tick, "time", 0))
+            if server_time_sec > 0:
+                utc_now_sec = now_msc / 1000
+                server_offset_hours = (server_time_sec - utc_now_sec) / 3600
+                # Round to nearest 0.5h to filter jitter.
+                server_offset_hours = round(server_offset_hours * 2) / 2
     tick = mt5.symbol_info_tick(plan["symbol"])
     if tick is None:
         return None
@@ -127,6 +139,9 @@ def _manage_plan(
     max_spread_points: int = 0,
     server_offset_hours: float = 3.0,
     close_spread_hard_cap_minutes: float = 10.0,
+    server_time_mode: str = "auto",
+    pending_timeout_enabled: bool = True,
+    exit_spread_guard_enabled: bool = True,
 ) -> None:
     if plan.get("status") != "active":
         return
@@ -135,7 +150,7 @@ def _manage_plan(
     orders = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
     if not positions:
         if orders:
-            if pending_timeout_minutes > 0:
+            if pending_timeout_enabled and pending_timeout_minutes > 0:
                 now_msc = time.time_ns() // 1_000_000
                 for order in orders:
                     placed_msc = int(getattr(order, "time_setup_msc", 0) or 0)
@@ -152,7 +167,8 @@ def _manage_plan(
                         return _manage_plan(
                             mt5, path, plan, deviation, pending_timeout_minutes,
                             max_spread_points, server_offset_hours,
-                            close_spread_hard_cap_minutes,
+                            close_spread_hard_cap_minutes, server_time_mode,
+                            pending_timeout_enabled, exit_spread_guard_enabled,
                         )
                     plan["status"] = "completed"
                     plan["completion_reason"] = "pending_timeout"
@@ -180,7 +196,7 @@ def _manage_plan(
         plan["entry_time_msc"] = int(getattr(position, "time_msc", int(position.time) * 1000))
         plan["entry_price"] = float(position.price_open)
     now_msc = time.time_ns() // 1_000_000
-    extreme = _favorable_extreme(mt5, plan, now_msc, server_offset_hours)
+    extreme = _favorable_extreme(mt5, plan, now_msc, server_offset_hours, server_time_mode)
     if extreme is None:
         return
     direction = Direction(plan["direction"])
@@ -197,7 +213,7 @@ def _manage_plan(
         return
 
     def close_allowed() -> bool:
-        if max_spread_points <= 0:
+        if not exit_spread_guard_enabled or max_spread_points <= 0:
             return True
         tick = mt5.symbol_info_tick(symbol)
         spread = float(tick.ask) - float(tick.bid) if tick else float("inf")
@@ -316,6 +332,9 @@ def manage(payload: dict[str, Any]) -> dict[str, Any]:
                     int(payload.get("max_spread_points", 0)),
                     float(payload.get("mt5_server_offset_hours", 3.0)),
                     float(payload.get("close_spread_hard_cap_minutes", 10.0)),
+                    str(payload.get("server_time_mode", "auto")),
+                    bool(payload.get("pending_timeout_enabled", True)),
+                    bool(payload.get("exit_spread_guard_enabled", True)),
                 )
                 managed += 1
     finally:
