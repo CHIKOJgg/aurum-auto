@@ -74,12 +74,14 @@ def _build_strategy_plan(
     volume_min: float,
     volume_step: float,
     published_at_ms: int | None = None,
+    take_profit_target: int | None = None,
 ) -> dict[str, Any]:
     target_number = effective_target(
         strategy,
         execution_kind=execution_kind.value,
         symbol=signal.symbol,
         published_at_ms=published_at_ms,
+        take_profit_target=take_profit_target,
     )
     exit_legs = executable_legs(
         strategy,
@@ -155,6 +157,8 @@ def _prepare_for_new_signal(
         return "failed", f"netting mode: orders_get failed: {mt5.last_error()}"
     removed = 0
     for order in orders:
+        if getattr(order, "magic", -1) != magic:
+            continue
         result = mt5.order_send(
             {
                 "action": mt5.TRADE_ACTION_REMOVE,
@@ -177,7 +181,10 @@ def _prepare_for_new_signal(
     remaining_orders = None
     for probe in range(3):
         remaining_orders = mt5.orders_get(symbol=symbol)
-        if remaining_orders is None or not remaining_orders:
+        if remaining_orders is None:
+            break
+        remaining_orders = tuple(o for o in remaining_orders if getattr(o, "magic", -1) == magic)
+        if not remaining_orders:
             break
         if probe < 2:
             time.sleep(0.1)
@@ -192,6 +199,8 @@ def _prepare_for_new_signal(
         return "failed", f"netting mode: positions_get failed: {mt5.last_error()}"
     closed = 0
     for position in positions:
+        if getattr(position, "magic", -1) != magic:
+            continue
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             return "failed", f"netting mode: no tick for position close: {mt5.last_error()}"
@@ -240,7 +249,10 @@ def _prepare_for_new_signal(
     remaining_positions = None
     for probe in range(3):
         remaining_positions = mt5.positions_get(symbol=symbol)
-        if remaining_positions is None or not remaining_positions:
+        if remaining_positions is None:
+            break
+        remaining_positions = tuple(p for p in remaining_positions if getattr(p, "magic", -1) == magic)
+        if not remaining_positions:
             break
         if probe < 2:
             time.sleep(0.1)
@@ -623,7 +635,20 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         stop_loss = _normalized(signal.stop_loss, digits)
         if signal.take_profits is None:
             return ExecutionResult(account.name, "failed", "selected exit strategy requires TP1-TP4")
-        take_profit = _normalized(_get_take_profit(signal, strategy.target_number), digits)
+        take_profit_target_preliminary = None
+        if "take_profit_target" in trading:
+            try:
+                take_profit_target_preliminary = int(trading["take_profit_target"])
+            except (ValueError, TypeError):
+                pass
+        preliminary_target = effective_target(
+            strategy,
+            execution_kind="pending",
+            symbol=signal.symbol,
+            published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
+            take_profit_target=take_profit_target_preliminary,
+        )
+        take_profit = _normalized(_get_take_profit(signal, preliminary_target), digits)
 
         order_side = (
             mt5.ORDER_TYPE_BUY
@@ -772,11 +797,18 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             )
             if not market_target_ahead:
                 execution_kind = ExecutionKind.LIMIT
+        take_profit_target = None
+        if "take_profit_target" in trading:
+            try:
+                take_profit_target = int(trading["take_profit_target"])
+            except (ValueError, TypeError):
+                pass
         target_number = effective_target(
             strategy,
             execution_kind=execution_kind.value,
             symbol=signal.symbol,
             published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
+            take_profit_target=take_profit_target,
         )
         take_profit = _normalized(_get_take_profit(signal, target_number), digits)
         exit_legs = executable_legs(

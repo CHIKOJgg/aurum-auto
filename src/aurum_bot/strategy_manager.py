@@ -372,7 +372,11 @@ def _manage_plan(
     # spamming 10016 errors if the price is hovering near the entry level.
     # The block below uses minimum_distance calculation.
 
-    if stop_target > int(plan.get("active_stop_target", -1)) or strategy.dynamic_tp2_minutes is not None:
+    missing_sl_tp = current_positions and any(
+        float(getattr(pos, "sl", 0.0) or 0.0) == 0.0 or float(getattr(pos, "tp", 0.0) or 0.0) == 0.0
+        for pos in current_positions
+    )
+    if stop_target > int(plan.get("active_stop_target", -1)) or strategy.dynamic_tp2_minutes is not None or missing_sl_tp:
         stop = desired_stop
         current_tick = mt5.symbol_info_tick(symbol)
         if current_tick is None:

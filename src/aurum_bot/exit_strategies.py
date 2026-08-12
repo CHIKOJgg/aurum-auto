@@ -95,6 +95,7 @@ def effective_target(
     execution_kind: str,
     symbol: str,
     published_at_ms: int | None,
+    take_profit_target: int | None = None,
 ) -> int:
     if strategy.target_by_order_kind is not None:
         market, pending = strategy.target_by_order_kind
@@ -107,7 +108,7 @@ def effective_target(
         timestamp = (published_at_ms or 0) / 1000
         hour = datetime.fromtimestamp(timestamp, timezone.utc).hour
         return active if strategy.session_start_hour_utc <= hour < strategy.session_end_hour_utc else other
-    return strategy.target_number
+    return take_profit_target if take_profit_target is not None else strategy.target_number
 
 
 def executable_legs(

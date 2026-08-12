@@ -141,9 +141,10 @@ class NettingPreparationTests(unittest.TestCase):
                     ticket=42,
                     type=FakeNettingMt5.POSITION_TYPE_BUY,
                     volume=0.3,
+                    magic=1234,
                 )
             ],
-            orders=[SimpleNamespace(ticket=77), SimpleNamespace(ticket=78)],
+            orders=[SimpleNamespace(ticket=77, magic=1234), SimpleNamespace(ticket=78, magic=1234)],
         )
         symbol_info = SimpleNamespace(
             digits=2,
@@ -184,6 +185,7 @@ class NettingPreparationTests(unittest.TestCase):
                     ticket=43,
                     type=FakeNettingMt5.POSITION_TYPE_SELL,
                     volume=0.2,
+                    magic=1234,
                 )
             ]
         )
@@ -218,9 +220,10 @@ class NettingPreparationTests(unittest.TestCase):
                     ticket=42,
                     type=FakeNettingMt5.POSITION_TYPE_BUY,
                     volume=0.3,
+                    magic=1234,
                 )
             ],
-            orders=[SimpleNamespace(ticket=77)],
+            orders=[SimpleNamespace(ticket=77, magic=1234)],
         )
         symbol_info = SimpleNamespace(
             digits=2,
