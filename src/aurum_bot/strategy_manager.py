@@ -142,6 +142,7 @@ def _manage_plan(
     server_time_mode: str = "auto",
     pending_timeout_enabled: bool = True,
     exit_spread_guard_enabled: bool = True,
+    symbol_max_spread_points: dict[str, int] | None = None,
 ) -> None:
     if plan.get("status") != "active":
         return
@@ -169,6 +170,7 @@ def _manage_plan(
                             max_spread_points, server_offset_hours,
                             close_spread_hard_cap_minutes, server_time_mode,
                             pending_timeout_enabled, exit_spread_guard_enabled,
+                            symbol_max_spread_points,
                         )
                     plan["status"] = "completed"
                     plan["completion_reason"] = "pending_timeout"
@@ -213,11 +215,14 @@ def _manage_plan(
         return
 
     def close_allowed() -> bool:
-        if not exit_spread_guard_enabled or max_spread_points <= 0:
+        effective_max_spread = max_spread_points
+        if symbol_max_spread_points and symbol.upper() in symbol_max_spread_points:
+            effective_max_spread = symbol_max_spread_points[symbol.upper()]
+        if not exit_spread_guard_enabled or effective_max_spread <= 0:
             return True
         tick = mt5.symbol_info_tick(symbol)
         spread = float(tick.ask) - float(tick.bid) if tick else float("inf")
-        limit = max_spread_points * float(symbol_info.point)
+        limit = effective_max_spread * float(symbol_info.point)
         if spread <= limit + 1e-12:
             plan.pop("close_deferred_since_msc", None)
             return True
@@ -335,6 +340,7 @@ def manage(payload: dict[str, Any]) -> dict[str, Any]:
                     str(payload.get("server_time_mode", "auto")),
                     bool(payload.get("pending_timeout_enabled", True)),
                     bool(payload.get("exit_spread_guard_enabled", True)),
+                    payload.get("symbol_max_spread_points"),
                 )
                 managed += 1
     finally:

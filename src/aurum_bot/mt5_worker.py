@@ -469,7 +469,16 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 return ExecutionResult(
                     account.name, "executed", "executed_existing", ticket=int(item.ticket)
                 )
-        max_spread_points = int(trading.get("max_spread_points", 0))
+        symbol_spreads = trading.get("symbol_max_spread_points") or {}
+        max_spread_points = int(
+            symbol_spreads.get(
+                signal.symbol.upper(),
+                symbol_spreads.get(
+                    broker_symbol.upper(),
+                    trading.get("max_spread_points", 0),
+                ),
+            )
+        )
         if bool(trading.get("entry_spread_guard_enabled", True)) and not spread_allowed(
             float(tick.ask),
             float(tick.bid),

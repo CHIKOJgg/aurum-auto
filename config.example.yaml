@@ -28,14 +28,26 @@ trading:
   # Also enter at market when the quote is within this fraction of the stop
   # distance (R) from the call entry, even if risk slightly exceeds the band
   # (e.g. after lot rounding). 0 = disabled.
+  # Also enter at market when the quote is within this fraction of the stop
+  # distance (R) from the call entry, even if risk slightly exceeds the band
+  # (e.g. after lot rounding). 0 = disabled.
   market_entry_tolerance_r: 0.25
   market_entry_tolerance_enabled: true
   # Cancel a pending order that has not been filled within this many minutes
   # after placement. 0 = keep pending orders forever.
   pending_timeout_minutes: 15
   pending_timeout_enabled: true
-  # Skip entry when the current spread exceeds this many points. 0 = disabled.
+  # Skip entry when the current spread exceeds this limit in points.
   max_spread_points: 50
+  # Per-instrument max spread points limit.
+  # FX pairs: 50 points (5 pips), Gold: 80 points ($0.80), Indices: 500 points (5.0 index pts).
+  symbol_max_spread_points:
+    GBPUSD: 50
+    EURUSD: 50
+    XAUUSD: 80
+    XAGUSD: 150
+    DE40: 500
+    US100: 500
   entry_spread_guard_enabled: true
   mt5_server_offset_hours: 3
   close_spread_hard_cap_minutes: 10

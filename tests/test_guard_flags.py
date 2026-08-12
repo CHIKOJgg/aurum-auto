@@ -74,6 +74,15 @@ class ConfigGuardFlagsTests(unittest.TestCase):
             "USNDAQ100": "US100"
         })
 
+    def test_symbol_max_spread_points_override(self):
+        config = self._load(lambda data: data["trading"].update(
+            max_spread_points=50,
+            symbol_max_spread_points={"DE40": 500, "XAUUSD": 80}
+        ))
+        self.assertEqual(config.trading.get_max_spread_points("GBPUSD"), 50)
+        self.assertEqual(config.trading.get_max_spread_points("DE40"), 500)
+        self.assertEqual(config.trading.get_max_spread_points("XAUUSD"), 80)
+
     def test_server_time_mode_defaults_to_auto(self):
         config = self._load()
         self.assertEqual(config.trading.server_time_mode, "auto")

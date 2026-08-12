@@ -121,6 +121,7 @@ def manage_exit_strategies(
             "strategy_state_dir": str(strategy_state_dir),
             "pending_timeout_minutes": trading.pending_timeout_minutes,
             "max_spread_points": trading.max_spread_points,
+            "symbol_max_spread_points": trading.symbol_max_spread_points,
             "mt5_server_offset_hours": trading.mt5_server_offset_hours,
             "server_time_mode": trading.server_time_mode,
             "close_spread_hard_cap_minutes": trading.close_spread_hard_cap_minutes,

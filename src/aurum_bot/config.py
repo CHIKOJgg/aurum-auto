@@ -58,6 +58,8 @@ class TradingConfig:
     allowed_symbols: frozenset[str] = frozenset({"XAUUSD", "XAGUSD", "DE40", "US100"})
     # Signal name aliases → canonical symbol names.
     symbol_aliases: dict[str, str] = None  # type: ignore[assignment]
+    # Per-symbol max spread points overrides.
+    symbol_max_spread_points: dict[str, int] = None  # type: ignore[assignment]
     # Feature guard toggles — each controls a specific safety feature.
     trading_enabled: bool = True
     market_entry_tolerance_enabled: bool = True
@@ -73,6 +75,19 @@ class TradingConfig:
                 "GOLD": "XAUUSD", "SILVER": "XAGUSD",
                 "GERMANY40": "DE40", "USNDAQ100": "US100",
             })
+        if self.symbol_max_spread_points is None:
+            object.__setattr__(self, 'symbol_max_spread_points', {
+                "GBPUSD": 50, "EURUSD": 50,
+                "XAUUSD": 80, "XAGUSD": 150,
+                "DE40": 500, "US100": 500,
+            })
+
+    def get_max_spread_points(self, symbol: str) -> int:
+        """Return the max spread limit in points for the given symbol."""
+        upper = symbol.upper()
+        if self.symbol_max_spread_points and upper in self.symbol_max_spread_points:
+            return self.symbol_max_spread_points[upper]
+        return self.max_spread_points
 
     @property
     def risk_percent(self) -> float:
@@ -224,6 +239,18 @@ def load_config(config_path: str | Path) -> AppConfig:
     else:
         raise ValueError("trading.symbol_aliases must be a YAML mapping (use 'GOLD: XAUUSD' syntax)")
 
+    raw_symbol_spreads = trading_raw.get("symbol_max_spread_points")
+    if isinstance(raw_symbol_spreads, dict):
+        symbol_max_spread_points = {str(k).upper(): int(v) for k, v in raw_symbol_spreads.items()}
+    elif raw_symbol_spreads is None:
+        symbol_max_spread_points = {
+            "GBPUSD": 50, "EURUSD": 50,
+            "XAUUSD": 80, "XAGUSD": 150,
+            "DE40": 500, "US100": 500,
+        }
+    else:
+        raise ValueError("trading.symbol_max_spread_points must be a YAML mapping (e.g. DE40: 500)")
+
     def _guard_bool(key: str, default: bool) -> bool:
         """Load a boolean guard flag, falling back to *default* if absent."""
         value = trading_raw.get(key)
@@ -259,6 +286,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         default_commission_per_lot_usd=max(0.0, float(trading_raw.get("default_commission_per_lot_usd", 7.0))),
         allowed_symbols=allowed_symbols,
         symbol_aliases=symbol_aliases,
+        symbol_max_spread_points=symbol_max_spread_points,
         # Guard toggles: default to True for safety, except where noted.
         trading_enabled=_guard_bool("trading_enabled", True),
         market_entry_tolerance_enabled=_guard_bool("market_entry_tolerance_enabled", True),
