@@ -41,11 +41,18 @@ def _close_position(mt5: Any, position: Any, symbol_info: Any, deviation: int, v
     tick = mt5.symbol_info_tick(position.symbol)
     if tick is None:
         return False
-    requested = min(float(position.volume), float(volume if volume is not None else position.volume))
+    raw_requested = float(volume if volume is not None else position.volume)
+    pos_vol = float(position.volume)
     step = float(symbol_info.volume_step)
-    requested = math.floor(requested / step + 1e-9) * step
-    if requested + 1e-9 < float(symbol_info.volume_min):
-        return False
+    vol_min = float(symbol_info.volume_min)
+    if pos_vol <= vol_min + 1e-9:
+        requested = pos_vol
+    else:
+        requested = min(pos_vol, raw_requested)
+        requested = math.floor(requested / step + 1e-9) * step
+        if requested + 1e-9 < vol_min:
+            requested = vol_min
+        requested = min(requested, pos_vol)
     kind = ExecutionKind.MARKET
     base = {
         "action": mt5.TRADE_ACTION_DEAL,
@@ -311,10 +318,11 @@ def _manage_plan(
     if strategy.timed_breakeven_minutes is not None:
         due = int(plan["entry_time_msc"]) + int(strategy.timed_breakeven_minutes * 60_000)
         current_tick = mt5.symbol_info_tick(symbol)
-        current = float(current_tick.bid if direction is Direction.LONG else current_tick.ask)
-        profitable = current > float(plan["entry_price"]) if direction is Direction.LONG else current < float(plan["entry_price"])
-        if now_msc >= due and profitable:
-            stop_target = max(stop_target, 0)
+        if current_tick is not None:
+            current = float(current_tick.bid if direction is Direction.LONG else current_tick.ask)
+            profitable = current > float(plan["entry_price"]) if direction is Direction.LONG else current < float(plan["entry_price"])
+            if now_msc >= due and profitable:
+                stop_target = max(stop_target, 0)
 
     if strategy.time_exit_minutes is not None:
         due = int(plan["entry_time_msc"]) + int(strategy.time_exit_minutes * 60_000)
@@ -338,6 +346,8 @@ def _manage_plan(
     if stop_target > int(plan.get("active_stop_target", -1)) or strategy.dynamic_tp2_minutes is not None:
         stop = desired_stop
         current_tick = mt5.symbol_info_tick(symbol)
+        if current_tick is None:
+            return
         current = float(current_tick.bid if direction is Direction.LONG else current_tick.ask)
         minimum_distance = max(
             float(symbol_info.trade_stops_level) * float(symbol_info.point),
