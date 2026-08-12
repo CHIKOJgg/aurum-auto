@@ -70,12 +70,18 @@ def parse_signal(
     header = HEADER_RE.search(text)
     entry_match = ENTRY_RE.search(text)
     sl_match = SL_RE.search(text)
-    take_profits = {
+    take_profits_raw = {
         int(match.group("number")): _price(match) for match in TP_RE.finditer(text)
     }
-    tp_match = take_profits.get(take_profit_target)
-    if not all((header, entry_match, sl_match, tp_match)):
+    if not all((header, entry_match, sl_match)) or not take_profits_raw or 1 not in take_profits_raw:
         return None
+
+    tp1 = take_profits_raw[1]
+    tp2 = take_profits_raw.get(2, tp1)
+    tp3 = take_profits_raw.get(3, tp2)
+    tp4 = take_profits_raw.get(4, tp3)
+    take_profits_tuple = (float(tp1), float(tp2), float(tp3), float(tp4))
+    take_profit = take_profits_tuple[take_profit_target - 1]
 
     raw_symbol = header.group("symbol").upper()
     if not is_supported_symbol(raw_symbol, allowed_symbols, symbol_aliases):
@@ -85,24 +91,19 @@ def parse_signal(
     direction = Direction(header.group("direction").upper())
     entry = _price(entry_match)
     stop_loss = _price(sl_match)
-    take_profit = float(tp_match)
-
-    if set(take_profits) != {1, 2, 3, 4}:
-        return None
 
     if direction is Direction.LONG:
         valid_geometry = (
             stop_loss < entry < take_profit
-            and take_profits[1] < take_profits[2] < take_profits[3] < take_profits[4]
+            and tp1 <= tp2 <= tp3 <= tp4
         )
     else:
         valid_geometry = (
             take_profit < entry < stop_loss
-            and take_profits[1] > take_profits[2] > take_profits[3] > take_profits[4]
+            and tp1 >= tp2 >= tp3 >= tp4
         )
     if not valid_geometry:
         return None
-
 
     return Signal(
         message_id=message_id,
@@ -111,10 +112,6 @@ def parse_signal(
         entry=entry,
         stop_loss=stop_loss,
         take_profit=take_profit,
-        take_profits=(
-            float(take_profits[1]),
-            float(take_profits[2]),
-            float(take_profits[3]),
-            float(take_profits[4]),
-        ),
+        take_profits=take_profits_tuple,
     )
+

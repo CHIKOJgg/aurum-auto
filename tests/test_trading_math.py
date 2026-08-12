@@ -232,7 +232,8 @@ class VolumeTests(unittest.TestCase):
         self.assertEqual(volume_for_risk(1_000, 1, 91.743, 0.01, 100, 0.01), 0.10)
 
     def test_below_minimum_becomes_001_within_overshoot_limit(self):
-        self.assertEqual(volume_for_risk(510, 1, 1000, 0.01, 100, 0.01), 0.01)
+        self.assertEqual(volume_for_risk(510, 1, 1000, 0.01, 100, 0.01, max_risk_overshoot_ratio=2.0), 0.01)
+
 
     def test_excessive_risk_overshoot_below_minimum_returns_none(self):
         # $100 risk_base, 1% risk = $1.00 target. Loss per lot = $5000. 0.01 lot loses $50 (50x target).

@@ -938,6 +938,11 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "comment": comment,
                 "type_time": mt5.ORDER_TIME_GTC,
             }
+            pending_timeout = float(trading.get("pending_timeout_minutes", 0.0) or 0.0)
+            if pending_timeout > 0:
+                request["expiration"] = int(time.time() + pending_timeout * 60)
+                request["type_time"] = int(getattr(mt5, "ORDER_TIME_SPECIFIED", 2))
+
 
         close_to_entry = abs(executable_price - entry) < minimum_distance
         strict_call_entry = bool(trading.get("strict_call_entry", False))
@@ -1022,11 +1027,14 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         volume_step=max(float(symbol_info.volume_step), float(trading["lot_step"])),
                         target_number=target_number,
                     )
-                    market_price = _normalized(refreshed_price, digits)
+                    market_price = _normalized(
+                        executable_price,
+                        int(symbol_info.digits),
+                    )
                     protected_geometry = (
-                        stop_loss < market_price < take_profit
+                        (stop_loss < market_price < take_profit)
                         if signal.direction is Direction.LONG
-                        else take_profit < market_price < stop_loss
+                        else (take_profit < market_price < stop_loss)
                     )
                     if not protected_geometry:
                         return ExecutionResult(
@@ -1037,33 +1045,34 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                             execution_kind=ExecutionKind.MARKET.value,
                         )
                     market_request = {
-                        "action": mt5.TRADE_ACTION_DEAL,
-                        "symbol": broker_symbol,
-                        "volume": volume,
-                        "type": order_side,
-                        "price": market_price,
-                        "sl": stop_loss,
-                        "tp": take_profit,
-                        "deviation": int(trading["deviation_points"]),
-                        "magic": magic,
-                        "comment": comment,
-                        "type_time": mt5.ORDER_TIME_GTC,
-                    }
-                    ok, ticket, market_detail, send_timing = _send_protected_order(
-                        mt5=mt5,
-                        base_request=market_request,
-                        symbol_info=symbol_info,
-                        symbol=broker_symbol,
-                        magic=magic,
-                        comment=comment,
-                        execution_kind=ExecutionKind.MARKET,
-                        attempts=int(trading["send_attempts"]),
-                        retry_delay=float(trading["retry_delay_seconds"]),
-                    )
-                    execution_kind = ExecutionKind.MARKET
-                    send_detail = (
-                        f"limit rejected ({send_detail}); market fallback: {market_detail}"
-                    )
+
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": broker_symbol,
+                    "volume": volume,
+                    "type": order_side,
+                    "price": market_price,
+                    "sl": stop_loss,
+                    "tp": take_profit,
+                    "deviation": int(trading["deviation_points"]),
+                    "magic": magic,
+                    "comment": comment,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                }
+                ok, ticket, market_detail, send_timing = _send_protected_order(
+                    mt5=mt5,
+                    base_request=market_request,
+                    symbol_info=symbol_info,
+                    symbol=broker_symbol,
+                    magic=magic,
+                    comment=comment,
+                    execution_kind=ExecutionKind.MARKET,
+                    attempts=int(trading["send_attempts"]),
+                    retry_delay=float(trading["retry_delay_seconds"]),
+                )
+                execution_kind = ExecutionKind.MARKET
+                send_detail = (
+                    f"limit rejected ({send_detail}); market fallback: {market_detail}"
+                )
         if not ok:
             return ExecutionResult(
                 account.name,
@@ -1075,7 +1084,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 execution_kind=execution_kind.value,
             )
 
-        if ticket is not None:
+        if ticket is not None and execution_kind is ExecutionKind.MARKET:
             # Ensure SL and TP are applied on broker server (for Market Execution accounts that strip SL/TP on deal entry)
             pos_ticket = ticket
             if hasattr(mt5, "history_deals_get"):

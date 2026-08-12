@@ -82,8 +82,9 @@ def volume_for_risk(
     volume_max: float,
     volume_step: float,
     commission_for_one_lot: float = 0.0,
-    max_risk_overshoot_ratio: float = 2.0,
+    max_risk_overshoot_ratio: float = 1.1,
 ) -> float | None:
+
     """Round down to lot step and enforce minimum if within safe risk bounds."""
     positive_values = (
         risk_base_usd,

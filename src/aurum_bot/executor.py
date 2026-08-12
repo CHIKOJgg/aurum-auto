@@ -111,59 +111,77 @@ def execute_for_accounts(
     return sorted(results, key=lambda item: item.account)
 
 
+def _manage_account_exit(
+    account: AccountConfig,
+    trading: TradingConfig,
+    strategy_state_dir: Path,
+) -> str | None:
+    if not account.enabled:
+        return None
+    payload = {
+        "account": account.to_dict(),
+        "deviation_points": trading.deviation_points,
+        "strategy_state_dir": str(strategy_state_dir),
+        "pending_timeout_minutes": trading.pending_timeout_minutes,
+        "max_spread_points": trading.max_spread_points,
+        "symbol_max_spread_points": trading.symbol_max_spread_points,
+        "mt5_server_offset_hours": trading.mt5_server_offset_hours,
+        "server_time_mode": trading.server_time_mode,
+        "close_spread_hard_cap_minutes": trading.close_spread_hard_cap_minutes,
+        "pending_timeout_enabled": trading.pending_timeout_enabled,
+        "exit_spread_guard_enabled": trading.exit_spread_guard_enabled,
+    }
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "aurum_bot.strategy_manager"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy(),
+        )
+        try:
+            stdout, stderr = proc.communicate(
+                input=json.dumps(payload),
+                timeout=trading.execution_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return (
+                f"{account.name}: strategy_manager timed out after "
+                f"{trading.execution_timeout_seconds}s"
+            )
+    except OSError as exc:
+        return f"{account.name}: strategy_manager failed to start: {exc}"
+
+    if proc.returncode != 0:
+        detail = (stderr or stdout).strip()
+        return (
+            f"{account.name}: exit_code={proc.returncode} "
+            f"detail={detail or '<empty>'} "
+            f"stdout={stdout.strip()[:200] or '<empty>'}"
+        )
+    return None
+
+
 def manage_exit_strategies(
     accounts: tuple[AccountConfig, ...],
     trading: TradingConfig,
     strategy_state_dir: Path,
 ) -> list[str]:
+    enabled = [account for account in accounts if account.enabled]
+    if not enabled:
+        return []
     errors: list[str] = []
-    for account in accounts:
-        if not account.enabled:
-            continue
-        payload = {
-            "account": account.to_dict(),
-            "deviation_points": trading.deviation_points,
-            "strategy_state_dir": str(strategy_state_dir),
-            "pending_timeout_minutes": trading.pending_timeout_minutes,
-            "max_spread_points": trading.max_spread_points,
-            "symbol_max_spread_points": trading.symbol_max_spread_points,
-            "mt5_server_offset_hours": trading.mt5_server_offset_hours,
-            "server_time_mode": trading.server_time_mode,
-            "close_spread_hard_cap_minutes": trading.close_spread_hard_cap_minutes,
-            "pending_timeout_enabled": trading.pending_timeout_enabled,
-            "exit_spread_guard_enabled": trading.exit_spread_guard_enabled,
-        }
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "aurum_bot.strategy_manager"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=os.environ.copy(),
-            )
-            try:
-                stdout, stderr = proc.communicate(
-                    input=json.dumps(payload),
-                    timeout=trading.execution_timeout_seconds,
-                )
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                errors.append(
-                    f"{account.name}: strategy_manager timed out after "
-                    f"{trading.execution_timeout_seconds}s"
-                )
-                continue
-        except OSError as exc:
-            errors.append(f"{account.name}: strategy_manager failed to start: {exc}")
-            continue
-
-        if proc.returncode != 0:
-            detail = (stderr or stdout).strip()
-            errors.append(
-                f"{account.name}: exit_code={proc.returncode} "
-                f"detail={detail or '<empty>'} "
-                f"stdout={stdout.strip()[:200] or '<empty>'}"
-            )
+    with ThreadPoolExecutor(max_workers=len(enabled)) as pool:
+        futures = [
+            pool.submit(_manage_account_exit, account, trading, strategy_state_dir)
+            for account in enabled
+        ]
+        for future in as_completed(futures):
+            res = future.result()
+            if res is not None:
+                errors.append(res)
     return errors
+
