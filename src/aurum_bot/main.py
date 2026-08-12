@@ -86,8 +86,8 @@ async def resolve_target_channel(client: TelegramClient, config: AppConfig) -> A
 
 
 async def latest_message_id(client: TelegramClient, channel: Any) -> int:
-    messages = await client.get_messages(channel, limit=1)
-    return int(messages[0].id) if messages else 0
+    messages = await client.get_messages(channel, limit=10)
+    return max((int(m.id) for m in messages), default=0)
 
 
 async def handle_message(
@@ -245,17 +245,18 @@ async def handle_message(
             and result.status == "executed"
         ):
             account = next(
-                item for item in config.accounts if item.name == result.account
+                (item for item in config.accounts if item.name == result.account), None
             )
-            journal_queue.put_nowait(
-                JournalExecution(
-                    signal=signal,
-                    result=result,
-                    account=account,
-                    risk_percent=config.trading.risk_percent,
-                    recorded_at=datetime.now().astimezone(),
+            if account:
+                journal_queue.put_nowait(
+                    JournalExecution(
+                        signal=signal,
+                        result=result,
+                        account=account,
+                        risk_percent=config.trading.get_risk_multiplier(signal.symbol),
+                        recorded_at=datetime.now().astimezone(),
+                    )
                 )
-            )
     if notification_queue is not None:
         for result in results:
             notification_queue.put_nowait(_notification_text(message_id, signal, result))

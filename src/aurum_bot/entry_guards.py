@@ -27,7 +27,7 @@ def margin_allowed(
 ) -> bool:
     """Reject when the trade would require more free margin than available."""
     if margin_required is None or margin_free is None:
-        return True
+        return False
     if margin_required < 0 or margin_free < 0:
         return False
     return margin_required + guard_level <= margin_free + 1e-9

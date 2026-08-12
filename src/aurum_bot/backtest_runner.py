@@ -109,8 +109,8 @@ def _enrich_financials(
             commission_one_lot = inferred_commission_one_lot
             record.commission_source = "mt5_history"
         else:
-            commission_one_lot = DEFAULT_COMMISSION_PER_LOT_USD
-            record.commission_source = "default_7_usd_per_lot"
+            commission_one_lot = trading.default_commission_per_lot_usd
+            record.commission_source = "default_config_usd_per_lot"
         record.commission_per_lot_usd = commission_one_lot
         raw_lot = raw_volume_for_risk(
             account.risk_base_usd,

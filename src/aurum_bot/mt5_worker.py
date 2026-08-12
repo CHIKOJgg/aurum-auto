@@ -73,12 +73,13 @@ def _build_strategy_plan(
     volume: float,
     volume_min: float,
     volume_step: float,
+    published_at_ms: int | None = None,
 ) -> dict[str, Any]:
     target_number = effective_target(
         strategy,
         execution_kind=execution_kind.value,
         symbol=signal.symbol,
-        published_at_ms=None,
+        published_at_ms=published_at_ms,
     )
     exit_legs = executable_legs(
         strategy,
@@ -563,14 +564,36 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         ticket=int(item.ticket),
                         execution_kind=exec_kind,
                         stop_loss=signal.stop_loss,
-                        volume=float(getattr(item, "volume_initial", getattr(item, "volume_current", 0.0))),
+                        volume=float(getattr(item, "volume_initial", getattr(item, "volume_current", getattr(item, "volume", 0.0)))),
                         volume_min=float(symbol_info.volume_min) if symbol_info else 0.01,
                         volume_step=float(symbol_info.volume_step) if symbol_info else 0.01,
+                        published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
                     )
                     _save_strategy_plan(state_dir, account.name, plan)
                     return ExecutionResult(
                         account.name, "executed", "executed_existing", ticket=int(item.ticket)
                     )
+        close_opposite = bool(trading.get("close_opposite_positions", False))
+        replace_existing = close_opposite and not _is_hedging_account(mt5, account_info)
+        preparation_status, preparation_detail = _prepare_for_new_signal(
+            mt5,
+            broker_symbol,
+            magic,
+            replace_existing=replace_existing,
+            symbol_info=symbol_info,
+            deviation_points=int(trading["deviation_points"]),
+        )
+        if preparation_status != "ready":
+            return ExecutionResult(account.name, preparation_status, preparation_detail)
+
+        tick = mt5.symbol_info_tick(broker_symbol)
+        if tick is None:
+            return ExecutionResult(
+                account.name,
+                "failed",
+                f"no refreshed tick data: {mt5.last_error()}",
+            )
+
         symbol_spreads = trading.get("symbol_max_spread_points") or {}
         max_spread_points = int(
             symbol_spreads.get(
@@ -592,27 +615,6 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "skipped_wide_spread",
                 f"spread {float(tick.ask) - float(tick.bid):g} exceeds "
                 f"max_spread_points={max_spread_points}",
-            )
-
-        close_opposite = bool(trading.get("close_opposite_positions", False))
-        replace_existing = close_opposite and not _is_hedging_account(mt5, account_info)
-        preparation_status, preparation_detail = _prepare_for_new_signal(
-            mt5,
-            broker_symbol,
-            magic,
-            replace_existing=replace_existing,
-            symbol_info=symbol_info,
-            deviation_points=int(trading["deviation_points"]),
-        )
-        if preparation_status != "ready":
-            return ExecutionResult(account.name, preparation_status, preparation_detail)
-
-        tick = mt5.symbol_info_tick(broker_symbol)
-        if tick is None:
-            return ExecutionResult(
-                account.name,
-                "failed",
-                f"no refreshed tick data: {mt5.last_error()}",
             )
 
         digits = int(symbol_info.digits)
@@ -650,7 +652,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             commission_one_lot = (
                 inferred_commission
                 if inferred_commission is not None
-                else DEFAULT_COMMISSION_PER_LOT_USD
+                else float(trading.get("default_commission_per_lot_usd", 7.0))
             )
         symbol_risks = trading.get("symbol_risk_multipliers") or {}
         risk_multiplier = float(
@@ -1034,6 +1036,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             volume=volume,
             volume_min=float(symbol_info.volume_min),
             volume_step=float(symbol_info.volume_step),
+            published_at_ms=(payload.get("timing") or {}).get("published_at_ms"),
         )
         _save_strategy_plan(payload.get("strategy_state_dir"), account.name, plan)
         return ExecutionResult(

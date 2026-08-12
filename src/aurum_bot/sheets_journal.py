@@ -41,6 +41,7 @@ TRADE_HEADERS = (
     "Результат, R",
     "Комментарий",
     "Изм. моего капитала, %",
+    "Статус",
 )
 WEEK_HEADERS = (
     "Неделя с",
@@ -746,7 +747,7 @@ class SheetsTradeJournal:
                             ),
                         ],
                     ),
-                    self._range(row, "U", [snapshot.status]),
+                    self._range(row, "W", [snapshot.status]),
                     *self._trade_formula_updates(row),
                 ]
             )

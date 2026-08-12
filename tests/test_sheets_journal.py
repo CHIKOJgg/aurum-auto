@@ -197,7 +197,7 @@ class SheetsJournalTests(unittest.TestCase):
         ranges = {item["range"] for item in batch}
         self.assertIn("'Сделки'!C2:D2", ranges)
         self.assertIn("'Сделки'!L2:N2", ranges)
-        self.assertIn("'Сделки'!U2", ranges)
+        self.assertIn("'Сделки'!W2", ranges)
 
     def test_template_setup_refuses_to_modify_a_populated_workbook(self):
         session = PopulatedWorkbookSession()
