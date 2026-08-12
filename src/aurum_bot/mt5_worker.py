@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
-import sys
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -286,7 +286,6 @@ def _already_applied(
         for position in positions:
             if int(position.magic) == magic:
                 ic = str(position.comment)
-                import re
                 if re.search(rf"{re.escape(comment)}(?!\d)", ic):
                     return int(position.ticket)
         return None
@@ -294,7 +293,6 @@ def _already_applied(
     orders = mt5.orders_get(symbol=symbol) or ()
     for order in orders:
         ic = str(order.comment)
-        import re
         if int(order.magic) == magic and re.search(rf"{re.escape(comment)}(?!\d)", ic):
             return int(order.ticket)
     return None
@@ -546,8 +544,14 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         for item in tuple(existing_pos) + tuple(existing_ord):
             if int(getattr(item, "magic", -1)) == magic:
                 ic = str(getattr(item, "comment", ""))
-                import re
                 if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                    state_dir = payload.get("strategy_state_dir")
+                    if state_dir:
+                        plan_path = Path(state_dir) / account.name / f"{signal.message_id}.json"
+                        if plan_path.exists():
+                            return ExecutionResult(
+                                account.name, "executed", "executed_existing", ticket=int(item.ticket)
+                            )
                     is_position = getattr(item, "time_update_msc", None) is not None
                     exec_kind = ExecutionKind.MARKET if is_position else ExecutionKind.PENDING
                     plan = _build_strategy_plan(
@@ -563,7 +567,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         volume_min=float(symbol_info.volume_min) if symbol_info else 0.01,
                         volume_step=float(symbol_info.volume_step) if symbol_info else 0.01,
                     )
-                    _save_strategy_plan(payload.get("strategy_state_dir"), account.name, plan)
+                    _save_strategy_plan(state_dir, account.name, plan)
                     return ExecutionResult(
                         account.name, "executed", "executed_existing", ticket=int(item.ticket)
                     )
@@ -1001,7 +1005,6 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 is_exact_match = (pos_ticket == ticket)
                 if not is_exact_match and int(getattr(pos, "magic", -1)) == magic:
                     ic = str(getattr(pos, "comment", ""))
-                    import re
                     is_exact_match = bool(re.search(rf"{re.escape(comment)}(?!\d)", ic))
                     
                 if is_exact_match and (

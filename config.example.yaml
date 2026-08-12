@@ -33,8 +33,6 @@ trading:
   # Enter at market only while stop risk is within the inclusive 0.9R-1.1R range.
   min_market_risk_multiplier: 0.9
   max_market_risk_multiplier: 1.1
-  # distance (R) from the call entry, even if risk slightly exceeds the band
-  # (e.g. after lot rounding). 0 = disabled.
   # Also enter at market when the quote is within this fraction of the stop
   # distance (R) from the call entry, even if risk slightly exceeds the band
   # (e.g. after lot rounding). 0 = disabled.
@@ -71,6 +69,8 @@ trading:
   news_window_after_minutes: 15
   news_guard_enabled: true
   margin_guard_enabled: true
+  # Fixed amount (in deposit currency) to keep as a free margin buffer.
+  margin_guard_level: 200.0
   # Round to the nearest hundredth and never request less than 0.01 lot.
   lot_step: 0.01
   deviation_points: 20

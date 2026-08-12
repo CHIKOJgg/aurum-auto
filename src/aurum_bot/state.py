@@ -43,7 +43,10 @@ class StateStore:
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("State file %s is corrupted: %s. Starting with clean state.", path, exc)
             corrupted_path = path.parent / f"{path.name}.corrupted.{int(time.time())}"
-            path.rename(corrupted_path)
+            try:
+                path.rename(corrupted_path)
+            except OSError as ren_exc:
+                logger.warning("Could not rename corrupted state file %s: %s", path, ren_exc)
             return {
                 "version": 1,
                 "channel_id": self.channel_id,

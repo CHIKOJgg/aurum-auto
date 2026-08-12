@@ -33,9 +33,14 @@ class YamlConfigurationTests(unittest.TestCase):
         config = self._load(lambda data: data["trading"].update(risk_multiplier=0.5))
         self.assertEqual(config.trading.risk_percent, 0.5)
 
-    def test_missing_critical_yaml_setting_prevents_startup(self):
-        with self.assertRaisesRegex(ValueError, "trading.lot_step"):
-            self._load(lambda data: data["trading"].pop("lot_step"))
+    def test_missing_critical_yaml_setting_uses_defaults(self):
+        # We removed _required for many fields, so they should load with defaults.
+        def _mutate(data):
+            data["trading"].pop("lot_step", None)
+            data["trading"].pop("magic_number", None)
+        cfg = self._load(_mutate)
+        self.assertEqual(cfg.trading.lot_step, 0.01)
+        self.assertEqual(cfg.trading.magic_number, 777777)
 
 
 if __name__ == "__main__":

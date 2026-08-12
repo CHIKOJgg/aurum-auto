@@ -56,7 +56,9 @@ def _close_position(mt5: Any, position: Any, symbol_info: Any, deviation: int, v
     else:
         requested = min(pos_vol, raw_requested)
         requested = math.floor(requested / step + 1e-9) * step
-        if requested + 1e-9 < vol_min:
+        if pos_vol - requested < vol_min:
+            requested = pos_vol
+        elif requested + 1e-9 < vol_min:
             requested = vol_min
         requested = min(requested, pos_vol)
     kind = ExecutionKind.MARKET
@@ -93,12 +95,15 @@ def _modify_position(mt5: Any, position: Any, *, stop: float, take_profit: float
     })
     if result is not None and int(result.retcode) in _success_codes(mt5):
         return True
-    LOGGER.warning(
-        "_modify_position failed for ticket %s: retcode=%s comment=%s",
-        getattr(position, "ticket", "unknown"),
-        getattr(result, "retcode", None),
-        getattr(result, "comment", None),
-    )
+    
+    retcode = getattr(result, "retcode", None)
+    if retcode != 10016:  # 10016 is Invalid Stops (spammy near entry)
+        LOGGER.warning(
+            "_modify_position failed for ticket %s: retcode=%s comment=%s",
+            getattr(position, "ticket", "unknown"),
+            retcode,
+            getattr(result, "comment", None),
+        )
     return False
 
 
@@ -197,7 +202,7 @@ def _manage_plan(
     symbol = str(plan["symbol"])
     raw_positions = mt5.positions_get(symbol=symbol)
     raw_orders = mt5.orders_get(symbol=symbol)
-    if raw_positions is None and raw_orders is None:
+    if raw_positions is None or raw_orders is None:
         return
     positions = _matching(list(raw_positions or ()), plan)
     orders = _matching(list(raw_orders or ()), plan)
@@ -205,6 +210,7 @@ def _manage_plan(
         if orders:
             if pending_timeout_enabled and pending_timeout_minutes > 0:
                 now_msc = time.time_ns() // 1_000_000
+                server_now_msc = now_msc + int(server_offset_hours * 3600_000)
                 created_text = str(plan.get("created_at", ""))
                 plan_created_msc = None
                 if created_text:
@@ -213,12 +219,17 @@ def _manage_plan(
                     except ValueError:
                         pass
                 for order in orders:
-                    placed_msc = plan_created_msc
-                    if not placed_msc:
+                    if plan_created_msc:
+                        elapsed = now_msc - plan_created_msc
+                    else:
                         placed_msc = int(getattr(order, "time_setup_msc", 0) or 0)
-                    if not placed_msc:
-                        placed_msc = int(getattr(order, "time_setup", 0) or 0) * 1000
-                    if placed_msc and now_msc - placed_msc >= pending_timeout_minutes * 60_000:
+                        if not placed_msc:
+                            placed_msc = int(getattr(order, "time_setup", 0) or 0) * 1000
+                        if not placed_msc:
+                            continue
+                        elapsed = server_now_msc - placed_msc
+
+                    if elapsed >= pending_timeout_minutes * 60_000:
                         _cancel_order(mt5, order)
                 remaining = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
                 if not remaining:
@@ -357,13 +368,9 @@ def _manage_plan(
 
     desired_stop = float(plan["entry_price"] if stop_target == 0 else levels[stop_target - 1] if stop_target > 0 else plan["stop_loss"])
     current_positions = _matching(list(mt5.positions_get(symbol=symbol) or ()), plan)
-    # Ensure open positions on MT5 always have SL and TP attached
-    if current_positions:
-        for pos in current_positions:
-            pos_sl = float(getattr(pos, "sl", 0.0) or 0.0)
-            pos_tp = float(getattr(pos, "tp", 0.0) or 0.0)
-            if pos_sl == 0.0 or pos_tp == 0.0:
-                _modify_position(mt5, pos, stop=desired_stop, take_profit=target_tp)
+    # We defer strict enforcement of initial SL to the block below to avoid
+    # spamming 10016 errors if the price is hovering near the entry level.
+    # The block below uses minimum_distance calculation.
 
     if stop_target > int(plan.get("active_stop_target", -1)) or strategy.dynamic_tp2_minutes is not None:
         stop = desired_stop

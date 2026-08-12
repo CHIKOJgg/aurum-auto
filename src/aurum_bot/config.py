@@ -233,8 +233,8 @@ def load_config(config_path: str | Path) -> AppConfig:
         channel_title=str(telegram_raw["channel_title"]),
         poll_interval_seconds=max(20, int(telegram_raw["poll_interval_seconds"])),
         session_file=_resolve(root, str(telegram_raw["session_file"])),
-        notifications_enabled=_bool(telegram_raw, "notifications_enabled", "telegram"),
-        notification_retry_count=max(0, int(_required(telegram_raw, "notification_retry_count", "telegram"))),
+        notifications_enabled=_bool(telegram_raw, "notifications_enabled", "telegram") if "notifications_enabled" in telegram_raw else True,
+        notification_retry_count=max(0, int(telegram_raw.get("notification_retry_count", 3))),
     )
     # Parse allowed symbols and aliases from YAML (with backwards-compatible defaults).
     raw_allowed = trading_raw.get("allowed_symbols")
@@ -285,11 +285,11 @@ def load_config(config_path: str | Path) -> AppConfig:
         risk_multiplier=float(trading_raw.get("risk_multiplier", trading_raw.get("risk_percent", 1.0))),
         min_market_risk_multiplier=float(trading_raw.get("min_market_risk_multiplier", trading_raw.get("min_market_risk_percent", 0.1))),
         max_market_risk_multiplier=float(trading_raw.get("max_market_risk_multiplier", trading_raw.get("max_market_risk_percent", 5.0))),
-        lot_step=float(_required(trading_raw, "lot_step", "trading")),
-        deviation_points=int(_required(trading_raw, "deviation_points", "trading")),
+        lot_step=float(trading_raw.get("lot_step", 0.01)),
+        deviation_points=int(trading_raw.get("deviation_points", 10)),
         send_attempts=max(1, int(trading_raw.get("send_attempts", 3))),
         retry_delay_seconds=max(0.0, float(trading_raw.get("retry_delay_seconds", 0.5))),
-        magic_number=int(_required(trading_raw, "magic_number", "trading")),
+        magic_number=int(trading_raw.get("magic_number", 777777)),
         take_profit_target=int(trading_raw.get("take_profit_target", 2)),
         exit_strategy=str(trading_raw.get("exit_strategy", "sl_tp2")).strip(),
         strict_call_entry=_guard_bool("strict_call_entry", True),
@@ -303,8 +303,8 @@ def load_config(config_path: str | Path) -> AppConfig:
         mt5_server_offset_hours=float(trading_raw.get("mt5_server_offset_hours", 0.0)),
         margin_guard_level=float(trading_raw.get("margin_guard_level", 200.0)),
         server_time_mode=str(trading_raw.get("server_time_mode", "auto")).strip().lower(),
-        close_spread_hard_cap_minutes=float(_required(trading_raw, "close_spread_hard_cap_minutes", "trading")),
-        execution_timeout_seconds=max(1, int(_required(trading_raw, "execution_timeout_seconds", "trading"))),
+        close_spread_hard_cap_minutes=float(trading_raw.get("close_spread_hard_cap_minutes", 10.0)),
+        execution_timeout_seconds=max(1, int(trading_raw.get("execution_timeout_seconds", 30))),
         default_commission_per_lot_usd=max(0.0, float(trading_raw.get("default_commission_per_lot_usd", 7.0))),
         allowed_symbols=allowed_symbols,
         symbol_aliases=symbol_aliases,
@@ -342,11 +342,11 @@ def load_config(config_path: str | Path) -> AppConfig:
         raise ValueError("trading.take_profit_target must be an integer from 1 to 4")
     get_strategy(trading.exit_strategy)
     runtime = RuntimeConfig(
-        reconcile_on_startup=_bool(runtime_raw, "reconcile_on_startup", "runtime"),
-        exit_strategy_manager_enabled=_bool(runtime_raw, "exit_strategy_manager_enabled", "runtime"),
-        exit_strategy_poll_seconds=max(0.1, float(_required(runtime_raw, "exit_strategy_poll_seconds", "runtime"))),
-        status_writer_enabled=_bool(runtime_raw, "status_writer_enabled", "runtime"),
-        status_write_interval_seconds=max(1.0, float(_required(runtime_raw, "status_write_interval_seconds", "runtime"))),
+        reconcile_on_startup=_bool(runtime_raw, "reconcile_on_startup", "runtime") if "reconcile_on_startup" in runtime_raw else True,
+        exit_strategy_manager_enabled=_bool(runtime_raw, "exit_strategy_manager_enabled", "runtime") if "exit_strategy_manager_enabled" in runtime_raw else True,
+        exit_strategy_poll_seconds=max(0.1, float(runtime_raw.get("exit_strategy_poll_seconds", 1.0))),
+        status_writer_enabled=_bool(runtime_raw, "status_writer_enabled", "runtime") if "status_writer_enabled" in runtime_raw else True,
+        status_write_interval_seconds=max(1.0, float(runtime_raw.get("status_write_interval_seconds", 60.0))),
     )
 
     accounts_raw = raw.get("accounts")

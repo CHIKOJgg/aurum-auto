@@ -72,6 +72,7 @@ class PendingTimeoutTests(unittest.TestCase):
             "deviation_points": 20,
             "strategy_state_dir": str(self._state_dir),
             "pending_timeout_minutes": pending_timeout_minutes,
+            "mt5_server_offset_hours": 0.0,
         }
 
     def _write_plan(self, message_id=900):

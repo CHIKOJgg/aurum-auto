@@ -29,7 +29,7 @@ def margin_allowed(
     if margin_required is None or margin_free is None:
         return True
     if margin_required < 0 or margin_free < 0:
-        return True
+        return False
     return margin_required + guard_level <= margin_free + 1e-9
 
 
