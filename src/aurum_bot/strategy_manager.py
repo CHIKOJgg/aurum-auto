@@ -292,9 +292,18 @@ def _manage_plan(
                 _save(path, plan)
                 return
 
+    desired_stop = float(plan["entry_price"] if stop_target == 0 else levels[stop_target - 1] if stop_target > 0 else plan["stop_loss"])
+    current_positions = _matching(list(mt5.positions_get(symbol=symbol) or ()), plan)
+    # Ensure open positions on MT5 always have SL and TP attached
+    if current_positions:
+        for pos in current_positions:
+            pos_sl = float(getattr(pos, "sl", 0.0) or 0.0)
+            pos_tp = float(getattr(pos, "tp", 0.0) or 0.0)
+            if pos_sl == 0.0 or pos_tp == 0.0:
+                _modify_position(mt5, pos, stop=desired_stop, take_profit=target_tp)
+
     if stop_target > int(plan.get("active_stop_target", -1)) or strategy.dynamic_tp2_minutes is not None:
-        stop = float(plan["entry_price"] if stop_target == 0 else levels[stop_target - 1] if stop_target > 0 else plan["stop_loss"])
-        current_positions = _matching(list(mt5.positions_get(symbol=symbol) or ()), plan)
+        stop = desired_stop
         current_tick = mt5.symbol_info_tick(symbol)
         current = float(current_tick.bid if direction is Direction.LONG else current_tick.ask)
         minimum_distance = max(

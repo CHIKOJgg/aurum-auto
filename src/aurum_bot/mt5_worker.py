@@ -888,6 +888,24 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 volume=volume,
                 execution_kind=execution_kind.value,
             )
+
+        if ticket is not None:
+            # Ensure SL and TP are applied on broker server (for Market Execution accounts that strip SL/TP on deal entry)
+            matching_positions = tuple(mt5.positions_get(ticket=ticket) or ())
+            if not matching_positions:
+                matching_positions = tuple(mt5.positions_get(symbol=broker_symbol) or ())
+            for pos in matching_positions:
+                if int(getattr(pos, "magic", -1)) == magic and (
+                    float(getattr(pos, "sl", 0.0) or 0.0) == 0.0
+                    or float(getattr(pos, "tp", 0.0) or 0.0) == 0.0
+                ):
+                    mt5.order_send({
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "symbol": broker_symbol,
+                        "position": int(pos.ticket),
+                        "sl": stop_loss,
+                        "tp": take_profit,
+                    })
         _save_strategy_plan(
             payload.get("strategy_state_dir"),
             account.name,
