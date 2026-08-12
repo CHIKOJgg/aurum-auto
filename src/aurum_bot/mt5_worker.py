@@ -503,11 +503,13 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 f"max_spread_points={max_spread_points}",
             )
 
+        close_opposite = bool(trading.get("close_opposite_positions", False))
+        replace_existing = close_opposite and not _is_hedging_account(mt5, account_info)
         preparation_status, preparation_detail = _prepare_for_new_signal(
             mt5,
             broker_symbol,
             magic,
-            replace_existing=not _is_hedging_account(mt5, account_info),
+            replace_existing=replace_existing,
             symbol_info=symbol_info,
             deviation_points=int(trading["deviation_points"]),
         )

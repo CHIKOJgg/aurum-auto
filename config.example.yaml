@@ -12,6 +12,9 @@ telegram:
 trading:
   # Master switch: false archives signals without sending any MT5 orders.
   trading_enabled: true
+  # false (default): Keep existing positions open when a new opposite signal arrives.
+  # true: Automatically close existing positions on the symbol before executing a new signal.
+  close_opposite_positions: false
   # Code base is exactly 1%. This YAML value only multiplies it.
   risk_multiplier: 1.0
   # Optional per-instrument risk multiplier overrides (e.g., XAUUSD: 3.0 for 3% risk).

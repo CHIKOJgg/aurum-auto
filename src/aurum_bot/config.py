@@ -70,6 +70,7 @@ class TradingConfig:
     news_guard_enabled: bool = True
     margin_guard_enabled: bool = True
     exit_spread_guard_enabled: bool = True
+    close_opposite_positions: bool = False
 
     def __post_init__(self) -> None:
         if self.symbol_aliases is None:
@@ -315,6 +316,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         news_guard_enabled=_guard_bool("news_guard_enabled", True),
         margin_guard_enabled=_guard_bool("margin_guard_enabled", True),
         exit_spread_guard_enabled=_guard_bool("exit_spread_guard_enabled", True),
+        close_opposite_positions=_guard_bool("close_opposite_positions", False),
     )
     if not 0 < trading.risk_multiplier <= 100:
         raise ValueError("trading.risk_multiplier must be > 0 and <= 100")
