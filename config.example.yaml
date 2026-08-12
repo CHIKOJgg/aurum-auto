@@ -42,7 +42,7 @@ trading:
   market_entry_tolerance_enabled: true
   # Cancel a pending order that has not been filled within this many minutes
   # after placement. 0 = keep pending orders forever.
-  pending_timeout_minutes: 15
+  pending_timeout_minutes: 30
   pending_timeout_enabled: true
   # Skip entry when the current spread exceeds this limit in points.
   max_spread_points: 50

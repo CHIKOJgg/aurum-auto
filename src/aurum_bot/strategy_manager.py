@@ -90,18 +90,30 @@ def _modify_position(mt5: Any, position: Any, *, stop: float, take_profit: float
 
 
 def _cancel_order(mt5: Any, order: Any) -> bool:
-    result = mt5.order_send({
+    order_ticket = int(getattr(order, "ticket", 0) or 0)
+    order_symbol = str(getattr(order, "symbol", "") or "")
+    order_magic = int(getattr(order, "magic", 0) or 0)
+    request: dict[str, Any] = {
         "action": mt5.TRADE_ACTION_REMOVE,
-        "order": int(order.ticket),
-    })
+        "order": order_ticket,
+    }
+    if order_symbol:
+        request["symbol"] = order_symbol
+    if order_magic > 0:
+        request["magic"] = order_magic
+    result = mt5.order_send(request)
     if result is None:
+        LOGGER.warning("_cancel_order order_send returned None for ticket %s: %s", order_ticket, mt5.last_error())
         return False
     accepted = {
         mt5.TRADE_RETCODE_DONE,
         mt5.TRADE_RETCODE_DONE_PARTIAL,
         int(getattr(mt5, "TRADE_RETCODE_ORDER_REMOVED", 4108)),
     }
-    return int(result.retcode) in accepted
+    ok = int(result.retcode) in accepted
+    if not ok:
+        LOGGER.warning("_cancel_order failed for ticket %s: retcode=%s comment=%s", order_ticket, result.retcode, result.comment)
+    return ok
 
 
 def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int, server_offset_hours: float = 3.0, server_time_mode: str = "auto") -> float | None:
@@ -171,8 +183,17 @@ def _manage_plan(
         if orders:
             if pending_timeout_enabled and pending_timeout_minutes > 0:
                 now_msc = time.time_ns() // 1_000_000
+                created_text = str(plan.get("created_at", ""))
+                plan_created_msc = None
+                if created_text:
+                    try:
+                        plan_created_msc = int(datetime.fromisoformat(created_text).timestamp() * 1000)
+                    except ValueError:
+                        pass
                 for order in orders:
-                    placed_msc = int(getattr(order, "time_setup_msc", 0) or 0)
+                    placed_msc = plan_created_msc
+                    if not placed_msc:
+                        placed_msc = int(getattr(order, "time_setup_msc", 0) or 0)
                     if not placed_msc:
                         placed_msc = int(getattr(order, "time_setup", 0) or 0) * 1000
                     if placed_msc and now_msc - placed_msc >= pending_timeout_minutes * 60_000:
