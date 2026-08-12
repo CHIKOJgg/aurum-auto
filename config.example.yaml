@@ -12,11 +12,11 @@ telegram:
 trading:
   # Master switch: false archives signals without sending any MT5 orders.
   trading_enabled: true
-  # Code base is exactly 1%. This YAML value multiplies it (2.0 = 2% risk per trade).
-  risk_multiplier: 2.0
-  # Per-instrument risk multiplier override (Gold: 3.0 = 3% risk per trade).
-  symbol_risk_multipliers:
-    XAUUSD: 3.0
+  # Code base is exactly 1%. This YAML value only multiplies it.
+  risk_multiplier: 1.0
+  # Optional per-instrument risk multiplier overrides (e.g., XAUUSD: 3.0 for 3% risk).
+  # symbol_risk_multipliers:
+  #   XAUUSD: 3.0
   # Select one of the strategy IDs documented in README.md.
   exit_strategy: "sl_tp2"
   # Legacy/default target used by parsers and reports.

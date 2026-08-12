@@ -84,9 +84,7 @@ class TradingConfig:
                 "DE40": 500, "US100": 500,
             })
         if self.symbol_risk_multipliers is None:
-            object.__setattr__(self, 'symbol_risk_multipliers', {
-                "XAUUSD": 3.0,
-            })
+            object.__setattr__(self, 'symbol_risk_multipliers', {})
 
     def get_risk_multiplier(self, symbol: str) -> float:
         """Return the risk multiplier for the given symbol (defaulting to risk_multiplier)."""
@@ -268,7 +266,7 @@ def load_config(config_path: str | Path) -> AppConfig:
     if isinstance(raw_symbol_risks, dict):
         symbol_risk_multipliers = {str(k).upper(): float(v) for k, v in raw_symbol_risks.items()}
     elif raw_symbol_risks is None:
-        symbol_risk_multipliers = {"XAUUSD": 3.0}
+        symbol_risk_multipliers = {}
     else:
         raise ValueError("trading.symbol_risk_multipliers must be a YAML mapping (e.g. XAUUSD: 3.0)")
 
