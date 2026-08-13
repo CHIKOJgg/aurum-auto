@@ -279,3 +279,71 @@ def test_error_handling(mt5_mock, plan_path, strategy_patch, caplog):
     assert updated_plan["exit_legs"][0]["closed"] is False
     # Touched target still increments since extreme was observed
     assert updated_plan["touched_target"] == 1
+
+
+def test_ipc_none_guards(mt5_mock, plan_path, strategy_patch):
+    """Verify that if mt5.orders_get or positions_get returns None, _manage_plan returns early without marking plan completed."""
+    create_plan(plan_path)
+    mt5_mock.positions_get.return_value = ()
+    order = SimpleNamespace(
+        ticket=10,
+        magic=12345,
+        comment="AURUM:test",
+        symbol="GOLD",
+        time_setup_msc=int(time.time() * 1000) - 3600_000,
+    )
+    mt5_mock.orders_get.return_value = (order,)
+
+    # Cancellation happens, but subsequent orders_get returns None
+    mt5_mock.orders_get.side_effect = [(order,), None]
+    mt5_mock.order_send.return_value = SimpleNamespace(retcode=mt5_mock.TRADE_RETCODE_DONE)
+
+    _manage_plan(
+        mt5=mt5_mock,
+        path=plan_path,
+        plan=json.loads(plan_path.read_text()),
+        deviation=10,
+        pending_timeout_minutes=30,
+        pending_timeout_enabled=True,
+    )
+
+    # Plan should still be active, not completed
+    updated_plan = json.loads(plan_path.read_text())
+    assert updated_plan["status"] == "active"
+
+
+def test_entry_time_msc_server_offset_conversion(mt5_mock, plan_path, strategy_patch):
+    """Verify position.time_msc (server time) is converted to UTC epoch when stored in plan['entry_time_msc']."""
+    create_plan(plan_path, entry_time_msc=None)
+    current_utc_msc = int(time.time() * 1000)
+    server_offset_hours = 3.0
+    server_time_msc = current_utc_msc + int(server_offset_hours * 3600_000)
+
+    position = SimpleNamespace(
+        ticket=1,
+        magic=12345,
+        comment="AURUM:test",
+        symbol="GOLD",
+        type=mt5_mock.POSITION_TYPE_BUY,
+        volume=1.0,
+        price_open=100.0,
+        time_msc=server_time_msc,
+        sl=90.0,
+        tp=130.0,
+    )
+    mt5_mock.positions_get.return_value = (position,)
+    mt5_mock.orders_get.return_value = ()
+
+    with patch("aurum_bot.strategy_manager._favorable_extreme", return_value=100.0):
+        _manage_plan(
+            mt5=mt5_mock,
+            path=plan_path,
+            plan=json.loads(plan_path.read_text()),
+            deviation=10,
+            server_offset_hours=server_offset_hours,
+        )
+
+    updated_plan = json.loads(plan_path.read_text())
+    # entry_time_msc should be converted to UTC epoch (server_time_msc - 3 hours)
+    expected_utc = server_time_msc - int(3.0 * 3600_000)
+    assert abs(updated_plan["entry_time_msc"] - expected_utc) < 1000

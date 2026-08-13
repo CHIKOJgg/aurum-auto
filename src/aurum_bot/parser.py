@@ -73,7 +73,7 @@ def parse_signal(
     take_profits_raw = {
         int(match.group("number")): _price(match) for match in TP_RE.finditer(text)
     }
-    if not all((header, entry_match, sl_match)) or not take_profits_raw or 1 not in take_profits_raw:
+    if not all((header, entry_match, sl_match)) or not {1, 2, 3, 4}.issubset(take_profits_raw):
         return None
 
     tp1 = take_profits_raw[1]

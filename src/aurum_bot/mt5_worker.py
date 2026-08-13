@@ -393,8 +393,10 @@ def _send_protected_order(
                 sl = float(base_request.get("sl", 0.0))
                 tp = float(base_request.get("tp", 0.0))
                 valid_geom = (sl < new_price < tp) if is_buy else (tp < new_price < sl)
-                if valid_geom:
-                    base_request["price"] = _normalized(new_price, int(symbol_info.digits))
+                if not valid_geom:
+                    last_detail = "refreshed price geometry invalid relative to SL/TP"
+                    continue
+                base_request["price"] = _normalized(new_price, int(symbol_info.digits))
 
         existing_ticket = _already_applied(
             mt5, symbol, magic, comment, execution_kind
@@ -613,7 +615,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                                 account.name, "executed", "executed_existing", ticket=int(item.ticket)
                             )
                     is_position = getattr(item, "time_update_msc", None) is not None
-                    exec_kind = ExecutionKind.MARKET if is_position else ExecutionKind.PENDING
+                    exec_kind = ExecutionKind.MARKET if is_position else ExecutionKind.LIMIT
                     plan = _build_strategy_plan(
                         signal=signal,
                         strategy=strategy,
@@ -632,19 +634,6 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                     return ExecutionResult(
                         account.name, "executed", "executed_existing", ticket=int(item.ticket)
                     )
-        close_opposite = bool(trading.get("close_opposite_positions", False))
-        replace_existing = close_opposite and not _is_hedging_account(mt5, account_info)
-        preparation_status, preparation_detail = _prepare_for_new_signal(
-            mt5,
-            broker_symbol,
-            magic,
-            replace_existing=replace_existing,
-            symbol_info=symbol_info,
-            deviation_points=int(trading["deviation_points"]),
-        )
-        if preparation_status != "ready":
-            return ExecutionResult(account.name, preparation_status, preparation_detail)
-
         tick = mt5.symbol_info_tick(broker_symbol)
         if tick is None:
             return ExecutionResult(
@@ -675,6 +664,19 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 f"spread {float(tick.ask) - float(tick.bid):g} exceeds "
                 f"max_spread_points={max_spread_points}",
             )
+
+        close_opposite = bool(trading.get("close_opposite_positions", False))
+        replace_existing = not _is_hedging_account(mt5, account_info) or close_opposite
+        preparation_status, preparation_detail = _prepare_for_new_signal(
+            mt5,
+            broker_symbol,
+            magic,
+            replace_existing=replace_existing,
+            symbol_info=symbol_info,
+            deviation_points=int(trading["deviation_points"]),
+        )
+        if preparation_status != "ready":
+            return ExecutionResult(account.name, preparation_status, preparation_detail)
 
         digits = int(symbol_info.digits)
         point = float(symbol_info.point)
@@ -792,12 +794,14 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         current_loss = theoretical_stop_loss_at(executable_price)
         min_market_loss = (
             account.risk_base_usd
-            * RISK_PERCENT_BASE * float(trading["min_market_risk_multiplier"])
+            * (RISK_PERCENT_BASE * risk_multiplier)
+            * float(trading["min_market_risk_multiplier"])
             / 100
         )
         max_market_loss = (
             account.risk_base_usd
-            * RISK_PERCENT_BASE * float(trading["max_market_risk_multiplier"])
+            * (RISK_PERCENT_BASE * risk_multiplier)
+            * float(trading["max_market_risk_multiplier"])
             / 100
         )
         valid_market_geometry = (
@@ -938,9 +942,16 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                 "comment": comment,
                 "type_time": mt5.ORDER_TIME_GTC,
             }
+            pending_timeout_enabled = bool(trading.get("pending_timeout_enabled", True))
             pending_timeout = float(trading.get("pending_timeout_minutes", 0.0) or 0.0)
-            if pending_timeout > 0:
-                request["expiration"] = int(time.time() + pending_timeout * 60)
+            if pending_timeout_enabled and pending_timeout > 0:
+                server_offset_hours = float(trading.get("mt5_server_offset_hours", 3.0))
+                if trading.get("server_time_mode", "auto") == "auto":
+                    tick_for_offset = mt5.symbol_info_tick(broker_symbol)
+                    if tick_for_offset is not None and int(getattr(tick_for_offset, "time", 0)) > 0:
+                        calculated = (float(tick_for_offset.time) - time.time()) / 3600.0
+                        server_offset_hours = round(calculated * 2) / 2
+                request["expiration"] = int(time.time() + server_offset_hours * 3600 + pending_timeout * 60)
                 request["type_time"] = int(getattr(mt5, "ORDER_TIME_SPECIFIED", 2))
 
 
@@ -1028,7 +1039,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                         target_number=target_number,
                     )
                     market_price = _normalized(
-                        executable_price,
+                        refreshed_price,
                         int(symbol_info.digits),
                     )
                     protected_geometry = (

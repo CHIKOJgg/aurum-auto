@@ -13,7 +13,9 @@ class Direction(str, Enum):
 class ExecutionKind(str, Enum):
     MARKET = "market"
     LIMIT = "limit"
+    PENDING = "pending"
     SKIP_STOP_CROSSED = "skip_stop_crossed"
+
 
 
 @dataclass(frozen=True)

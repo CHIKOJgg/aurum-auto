@@ -444,12 +444,8 @@ def run_backtest(
                         broker_symbol=metadata.broker_symbol,
                         point=metadata.point,
                         trade_stops_level=metadata.trade_stops_level,
-                        max_market_risk_ratio=(
-                            trading.max_market_risk_percent / trading.risk_percent
-                        ),
-                        min_market_risk_ratio=(
-                            trading.min_market_risk_percent / trading.risk_percent
-                        ),
+                        max_market_risk_ratio=trading.max_market_risk_multiplier,
+                        min_market_risk_ratio=trading.min_market_risk_multiplier,
                         execution_delay_seconds=0.4,
                         strict_call_entry=trading.strict_call_entry,
                         market_entry_tolerance_r=trading.market_entry_tolerance_r,

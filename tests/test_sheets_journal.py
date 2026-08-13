@@ -199,6 +199,33 @@ class SheetsJournalTests(unittest.TestCase):
         self.assertIn("'Сделки'!L2:N2", ranges)
         self.assertIn("'Сделки'!W2", ranges)
 
+    def test_snapshot_updates_with_float_string_id(self):
+        session = FakeSession(id_values=[["123.0"]])
+        journal = SheetsTradeJournal(config(), session=session)
+        count = journal.upsert_snapshots(
+            [
+                TradeSnapshot(
+                    message_id=123,
+                    account="fxpro_demo510",
+                    symbol="XAUUSD",
+                    direction="BUY",
+                    volume=0.1,
+                    open_time="2026-07-25T10:00:00+00:00",
+                    open_price=2400,
+                    close_time="2026-07-25T12:00:00+00:00",
+                    close_price=2420,
+                    commission=-1,
+                    swap=0,
+                    gross_pnl=20,
+                    status="CLOSED",
+                )
+            ]
+        )
+        self.assertEqual(count, 1)
+        batch = session.calls[-1][2]["json"]["data"]
+        ranges = {item["range"] for item in batch}
+        self.assertIn("'Сделки'!C2:D2", ranges)
+
     def test_template_setup_refuses_to_modify_a_populated_workbook(self):
         session = PopulatedWorkbookSession()
         journal = SheetsTradeJournal(config(), session=session)
@@ -219,6 +246,36 @@ class SheetsJournalTests(unittest.TestCase):
         self.assertIn("Моя доля P&L", written)
         self.assertIn("Мой капитал (начало)", written)
         self.assertIn("PASTE_FORMULA", written)
+
+    def test_ensure_template_passes_on_23_column_populated_sheet(self):
+        class CorrectHeaderSession(FakeSession):
+            def request(self, method, url, **kwargs):
+                self.calls.append((method, url, kwargs))
+                if method == "GET" and url.endswith("/sheet-id"):
+                    return FakeResponse(
+                        {
+                            "sheets": [
+                                {"properties": {"sheetId": 0, "title": "Сделки"}},
+                                {"properties": {"sheetId": 1, "title": "Недели"}},
+                                {"properties": {"sheetId": 2, "title": "Настройки"}},
+                            ]
+                        }
+                    )
+                if method == "GET":
+                    if "A1:W1" in url or "A1:V1" in url:
+                        from aurum_bot.sheets_journal import TRADE_HEADERS
+                        return FakeResponse({"values": [list(TRADE_HEADERS)]})
+                    if "A1:M1" in url:
+                        from aurum_bot.sheets_journal import WEEK_HEADERS
+                        return FakeResponse({"values": [list(WEEK_HEADERS)]})
+                    if "A1:C1" in url:
+                        from aurum_bot.sheets_journal import SETTINGS_HEADERS
+                        return FakeResponse({"values": [list(SETTINGS_HEADERS)]})
+                return FakeResponse({})
+
+        session = CorrectHeaderSession()
+        journal = SheetsTradeJournal(config(), session=session)
+        journal.ensure_template()
 
 
 if __name__ == "__main__":

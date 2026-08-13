@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end")
     parser.add_argument("--output-dir", default="data")
     parser.add_argument("--results-dir", default="backtests")
-    parser.add_argument("--account", default="fxpro_demo510")
+    parser.add_argument("--account", default="fxpro_demo")
     parser.add_argument(
         "--terminal-path",
         help=(

@@ -229,12 +229,18 @@ def _manage_plan(
 
                     if elapsed >= pending_timeout_minutes * 60_000:
                         _cancel_order(mt5, order)
-                remaining = _matching(list(mt5.orders_get(symbol=symbol) or ()), plan)
+                rem_orders_raw = mt5.orders_get(symbol=symbol)
+                if rem_orders_raw is None:
+                    return
+                remaining = _matching(list(rem_orders_raw), plan)
                 if not remaining:
                     # An order may fill while cancellation is in flight.  Re-read
                     # positions before declaring the plan complete, otherwise a
                     # newly filled position would be left unmanaged.
-                    if _matching(list(mt5.positions_get(symbol=symbol) or ()), plan):
+                    rem_positions_raw = mt5.positions_get(symbol=symbol)
+                    if rem_positions_raw is None:
+                        return
+                    if _matching(list(rem_positions_raw), plan):
                         return _manage_plan(
                             mt5, path, plan, deviation, pending_timeout_minutes,
                             max_spread_points, server_offset_hours,
@@ -270,7 +276,12 @@ def _manage_plan(
 
     position = positions[0]
     if plan.get("entry_time_msc") is None:
-        plan["entry_time_msc"] = int(getattr(position, "time_msc", int(position.time) * 1000))
+        pos_time_msc = getattr(position, "time_msc", None)
+        if pos_time_msc is None:
+            pos_time_msc = int(getattr(position, "time", 0)) * 1000
+        else:
+            pos_time_msc = int(pos_time_msc)
+        plan["entry_time_msc"] = pos_time_msc - int(server_offset_hours * 3600_000)
         plan["entry_price"] = float(position.price_open)
     now_msc = time.time_ns() // 1_000_000
     extreme = _favorable_extreme(mt5, plan, now_msc, server_offset_hours, server_time_mode)
@@ -328,7 +339,9 @@ def _manage_plan(
         if remaining <= 1e-9:
             leg["closed"] = True
 
-    target_tp = float(levels[int(plan["final_target"]) - 1])
+    if not levels:
+        return
+    target_tp = float(levels[min(len(levels) - 1, max(0, int(plan["final_target"]) - 1))])
     if strategy.dynamic_tp2_minutes is not None and touched >= 2:
         elapsed = (now_msc - int(plan["entry_time_msc"])) / 60_000
         selected = strategy.dynamic_fast_target if elapsed <= strategy.dynamic_tp2_minutes else strategy.dynamic_slow_target
@@ -389,7 +402,7 @@ def _manage_plan(
             if direction is Direction.LONG
             else stop - current >= minimum_distance
         )
-        if current_positions and not stop_is_placeable and stop_target >= 0:
+        if current_positions and not stop_is_placeable and (stop_target >= 0 or missing_sl_tp):
             # The trigger and reversal happened between polls (or while the bot
             # was stopped). Do not leave the wider original risk in place.
             if close_allowed() and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):

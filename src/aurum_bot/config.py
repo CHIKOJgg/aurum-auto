@@ -283,8 +283,8 @@ def load_config(config_path: str | Path) -> AppConfig:
 
     trading = TradingConfig(
         risk_multiplier=float(trading_raw.get("risk_multiplier", trading_raw.get("risk_percent", 1.0))),
-        min_market_risk_multiplier=float(trading_raw.get("min_market_risk_multiplier", trading_raw.get("min_market_risk_percent", 0.1))),
-        max_market_risk_multiplier=float(trading_raw.get("max_market_risk_multiplier", trading_raw.get("max_market_risk_percent", 5.0))),
+        min_market_risk_multiplier=float(trading_raw.get("min_market_risk_multiplier", trading_raw.get("min_market_risk_percent", 0.9))),
+        max_market_risk_multiplier=float(trading_raw.get("max_market_risk_multiplier", trading_raw.get("max_market_risk_percent", 1.1))),
         lot_step=float(trading_raw.get("lot_step", 0.01)),
         deviation_points=int(trading_raw.get("deviation_points", 10)),
         send_attempts=max(1, int(trading_raw.get("send_attempts", 3))),

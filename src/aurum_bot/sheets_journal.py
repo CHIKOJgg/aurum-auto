@@ -228,7 +228,7 @@ class SheetsTradeJournal:
             SETTINGS_SHEET: list(SETTINGS_HEADERS),
         }
         for title, headers in expected.items():
-            end_column = {22: "V", 13: "M", 3: "C"}[len(headers)]
+            end_column = {23: "W", 22: "V", 13: "M", 3: "C"}.get(len(headers), "W")
             rows = self._read_values(f"'{title}'!A1:{end_column}1")
             if not rows or rows[0] != headers:
                 return False
@@ -475,7 +475,7 @@ class SheetsTradeJournal:
                 free.append(row_number)
                 continue
             try:
-                existing[int(value)] = row_number
+                existing[int(float(value))] = row_number
             except (TypeError, ValueError):
                 continue
         return existing, free

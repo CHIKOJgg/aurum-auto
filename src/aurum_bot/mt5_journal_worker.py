@@ -22,11 +22,12 @@ def _weighted_price(deals: Iterable[Any]) -> float:
     return sum(float(item.price) * float(item.volume) for item in items) / total_volume
 
 
-def _deal_time(deal: Any) -> str:
+def _deal_time(deal: Any, server_offset_hours: float = 3.0) -> str:
     timestamp = float(getattr(deal, "time_msc", 0)) / 1000
     if timestamp <= 0:
         timestamp = float(deal.time)
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+    utc_timestamp = timestamp - float(server_offset_hours) * 3600
+    return datetime.fromtimestamp(utc_timestamp, tz=timezone.utc).isoformat()
 
 
 def build_snapshots(
@@ -36,6 +37,7 @@ def build_snapshots(
     open_position_ids: set[int],
     magic: int,
     mt5: Any,
+    server_offset_hours: float = 3.0,
 ) -> list[dict[str, Any]]:
     all_deals = list(deals)
     own_position_ids = {
@@ -98,9 +100,9 @@ def build_snapshots(
                 "symbol": reverse_symbols.get(broker_symbol, broker_symbol),
                 "direction": direction,
                 "volume": entry_volume,
-                "open_time": _deal_time(first),
+                "open_time": _deal_time(first, server_offset_hours),
                 "open_price": _weighted_price(entries),
-                "close_time": _deal_time(exits[-1]) if closed else None,
+                "close_time": _deal_time(exits[-1], server_offset_hours) if closed else None,
                 "close_price": _weighted_price(exits) if closed else None,
                 "commission": sum(
                     float(getattr(item, "commission", 0))
@@ -126,6 +128,7 @@ def collect(payload: dict[str, Any]) -> list[dict[str, Any]]:
     account = AccountConfig(**payload["account"])
     magic = int(payload["magic_number"])
     lookback_days = int(payload["lookback_days"])
+    server_offset_hours = float(payload.get("server_offset_hours", 3.0))
     import MetaTrader5 as mt5
 
     terminal_path = Path(account.terminal_path)
@@ -157,6 +160,7 @@ def collect(payload: dict[str, Any]) -> list[dict[str, Any]]:
             open_position_ids=open_ids,
             magic=magic,
             mt5=mt5,
+            server_offset_hours=server_offset_hours,
         )
     finally:
         mt5.shutdown()
