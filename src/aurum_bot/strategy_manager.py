@@ -14,6 +14,11 @@ from .models import AccountConfig, Direction, ExecutionKind
 from .mt5_worker import _filling_candidates, _normalized, _success_codes
 
 
+_UTC_CLOCK_VERSION = 2
+_MAX_BROKER_OFFSET_HOURS = 14
+_OFFSET_TOLERANCE_MSC = 5 * 60 * 1000
+
+
 def _save(path: Path, plan: dict[str, Any]) -> None:
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -75,25 +80,79 @@ def _modify_position(mt5: Any, position: Any, *, stop: float, take_profit: float
     return result is not None and int(result.retcode) in _success_codes(mt5)
 
 
-def _favorable_extreme(mt5: Any, plan: dict[str, Any], now_msc: int) -> float | None:
-    tick = mt5.symbol_info_tick(plan["symbol"])
+def _broker_offset_msc(
+    tick: Any,
+    utc_now_msc: int,
+    saved_offset_msc: int | None = None,
+) -> int:
+    """Return the broker clock offset, rounded to a whole hour.
+
+    Some MT5 terminals expose tick and position timestamps in server time even
+    though the Python API accepts timezone-aware datetimes. Comparing those raw
+    values with the host's Unix clock can shift a history window by several
+    hours. A fresh tick gives us both clocks at the same instant.
+    """
+    tick_msc = int(getattr(tick, "time_msc", 0) or 0)
+    if tick_msc <= 0:
+        return int(saved_offset_msc or 0)
+    hour_msc = 3_600_000
+    difference = tick_msc - utc_now_msc
+    rounded = round(difference / hour_msc) * hour_msc
+    if (
+        abs(rounded) <= _MAX_BROKER_OFFSET_HOURS * hour_msc
+        and abs(difference - rounded) <= _OFFSET_TOLERANCE_MSC
+    ):
+        return int(rounded)
+    return int(saved_offset_msc or 0)
+
+
+def _favorable_extreme(
+    mt5: Any,
+    plan: dict[str, Any],
+    now_msc: int,
+    broker_offset_msc: int,
+    tick: Any | None = None,
+) -> float | None:
+    tick = tick or mt5.symbol_info_tick(plan["symbol"])
     if tick is None:
         return None
     direction = Direction(plan["direction"])
     current = float(tick.bid if direction is Direction.LONG else tick.ask)
-    start_msc = plan.get("last_check_msc") or plan.get("entry_time_msc")
-    if not start_msc:
+    entry_msc = int(plan.get("entry_time_msc") or 0)
+    if entry_msc <= 0 or now_msc < entry_msc:
         return current
+    last_check_msc = int(plan.get("last_check_msc") or entry_msc)
+    # Keep the one-second overlap used to avoid missing a boundary tick, but
+    # never allow that overlap to reach back before the actual position fill.
+    start_msc = max(entry_msc, last_check_msc - 1000)
     try:
         ticks = mt5.copy_ticks_range(
             plan["symbol"],
-            datetime.fromtimestamp(max(0, int(start_msc) - 1000) / 1000, timezone.utc),
-            datetime.fromtimestamp(now_msc / 1000, timezone.utc),
+            datetime.fromtimestamp(
+                (start_msc + broker_offset_msc) / 1000,
+                timezone.utc,
+            ),
+            datetime.fromtimestamp(
+                (now_msc + broker_offset_msc) / 1000,
+                timezone.utc,
+            ),
             mt5.COPY_TICKS_ALL,
         )
         if ticks is None or len(ticks) == 0:
             return current
-        values = ticks["bid"] if direction is Direction.LONG else ticks["ask"]
+        normalized_times = ticks["time_msc"].astype("int64") - broker_offset_msc
+        valid = (
+            (normalized_times >= start_msc)
+            & (normalized_times >= entry_msc)
+            & (normalized_times <= now_msc)
+        )
+        if not valid.any():
+            return current
+        values = (
+            ticks["bid"][valid]
+            if direction is Direction.LONG
+            else ticks["ask"][valid]
+        )
         return float(max(values) if direction is Direction.LONG else min(values))
     except Exception:
         return current
@@ -114,11 +173,41 @@ def _manage_plan(mt5: Any, path: Path, plan: dict[str, Any], deviation: int) -> 
         return
 
     position = positions[0]
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        return
+    utc_now_msc = time.time_ns() // 1_000_000
+    broker_offset_msc = _broker_offset_msc(
+        tick,
+        utc_now_msc,
+        plan.get("mt5_time_offset_msc"),
+    )
+    if int(plan.get("clock_version", 0)) < _UTC_CLOCK_VERSION:
+        # Old plans stored the raw broker timestamp. Re-read the position so an
+        # UTC+3 value cannot make the manager inspect pre-entry price history.
+        plan["entry_time_msc"] = None
+        plan["last_check_msc"] = None
+    plan["clock_version"] = _UTC_CLOCK_VERSION
+    plan["mt5_time_offset_msc"] = broker_offset_msc
     if plan.get("entry_time_msc") is None:
-        plan["entry_time_msc"] = int(getattr(position, "time_msc", int(position.time) * 1000))
+        raw_entry_msc = int(
+            getattr(position, "time_msc", int(position.time) * 1000)
+        )
+        plan["entry_time_msc"] = raw_entry_msc - broker_offset_msc
         plan["entry_price"] = float(position.price_open)
-    now_msc = time.time_ns() // 1_000_000
-    extreme = _favorable_extreme(mt5, plan, now_msc)
+    raw_tick_msc = int(getattr(tick, "time_msc", 0) or 0)
+    now_msc = (
+        raw_tick_msc - broker_offset_msc
+        if raw_tick_msc > 0
+        else utc_now_msc
+    )
+    extreme = _favorable_extreme(
+        mt5,
+        plan,
+        now_msc,
+        broker_offset_msc,
+        tick,
+    )
     if extreme is None:
         return
     direction = Direction(plan["direction"])
