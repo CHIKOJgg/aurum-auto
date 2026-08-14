@@ -87,6 +87,7 @@ def _setup_mock_mt5(mock_mt5):
     mock_mt5.TRADE_ACTION_SLTP = 6
     mock_mt5.TRADE_RETCODE_DONE = 10009
     mock_mt5.TRADE_RETCODE_PLACED = 10008
+    mock_mt5.TRADE_RETCODE_DONE_PARTIAL = 10010
     mock_mt5.ORDER_TIME_GTC = 0
     mock_mt5.ORDER_FILLING_FOK = 0
     
@@ -316,9 +317,13 @@ def test_emergency_position_close_on_sltp_failure(mock_is_file, base_payload):
     mock_position.symbol = "XAUUSD"
     
     # Return empty positions before deal, position after deal
+    ticket_queries = 0
+
     def positions_get_side_effect(*args, **kwargs):
+        nonlocal ticket_queries
         if kwargs.get("ticket") == 8888:
-            return (mock_position,)
+            ticket_queries += 1
+            return (mock_position,) if ticket_queries == 1 else ()
         return ()
     mt5.positions_get.side_effect = positions_get_side_effect
     
@@ -371,4 +376,90 @@ def test_emergency_position_close_failure_alert(mock_is_file, base_payload):
     
     assert result.status == "failed"
     assert "CRITICAL: emergency position close FAILED" in result.detail
+    assert "remaining_volume=0.01" in result.detail
+
+
+@patch("aurum_bot.mt5_worker.Path.is_file")
+@patch.dict(sys.modules, {"MetaTrader5": MagicMock()})
+def test_market_position_lookup_failure_is_not_reported_as_executed(
+    mock_is_file, base_payload
+):
+    mock_is_file.return_value = True
+    import MetaTrader5 as mt5
+
+    _setup_mock_mt5(mt5)
+    mt5.order_check.return_value = MagicMock(retcode=0)
+    mt5.order_send.return_value = MagicMock(retcode=10009, order=8888)
+    mt5.positions_get.return_value = ()
+
+    result = execute(base_payload)
+
+    assert result.status == "failed"
+    assert result.ticket == 8888
+    assert "could not be found to verify mandatory SL/TP" in result.detail
+
+
+@patch("aurum_bot.mt5_worker.Path.is_file")
+@patch.dict(sys.modules, {"MetaTrader5": MagicMock()})
+def test_partial_emergency_close_retries_until_position_disappears(
+    mock_is_file, base_payload
+):
+    mock_is_file.return_value = True
+    import MetaTrader5 as mt5
+
+    _setup_mock_mt5(mt5)
+    mt5.order_check.return_value = MagicMock(retcode=0)
+
+    deal_result = MagicMock(retcode=10009, order=8888)
+    sltp_failure = MagicMock(retcode=10016)
+    partial_close = MagicMock(retcode=10010)
+    completed_close = MagicMock(retcode=10009)
+    mt5.order_send.side_effect = [
+        deal_result,
+        sltp_failure,
+        sltp_failure,
+        sltp_failure,
+        partial_close,
+        completed_close,
+    ]
+
+    initial_position = MagicMock(
+        ticket=8888,
+        magic=1001,
+        sl=0.0,
+        tp=0.0,
+        type=mt5.ORDER_TYPE_BUY,
+        volume=0.02,
+        symbol="XAUUSD",
+    )
+    remaining_position = MagicMock(
+        ticket=8888,
+        magic=1001,
+        sl=0.0,
+        tp=0.0,
+        type=mt5.ORDER_TYPE_BUY,
+        volume=0.01,
+        symbol="XAUUSD",
+    )
+    ticket_results = iter(
+        [(initial_position,), (remaining_position,), ()]
+    )
+
+    def positions_get_side_effect(*args, **kwargs):
+        if kwargs.get("ticket") == 8888:
+            return next(ticket_results)
+        return ()
+
+    mt5.positions_get.side_effect = positions_get_side_effect
+
+    result = execute(base_payload)
+
+    assert result.status == "failed"
+    assert "emergency position close" in result.detail
+    close_requests = [
+        call.args[0]
+        for call in mt5.order_send.mock_calls
+        if call.args[0].get("comment") == "AURUM:emergency_close"
+    ]
+    assert [request["volume"] for request in close_requests] == [0.02, 0.01]
 
