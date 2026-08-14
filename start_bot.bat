@@ -40,6 +40,8 @@ echo Starting Aurum Research Club - MT5 bot...
 echo Press Ctrl+C twice quickly to stop.
 echo.
 
+set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+
 "%PYTHON_EXE%" -m aurum_bot.main --config "%CONFIG_FILE%"
 set "BOT_EXIT_CODE=%ERRORLEVEL%"
 

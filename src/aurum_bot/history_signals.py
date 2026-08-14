@@ -4,7 +4,7 @@ import csv
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -116,7 +116,7 @@ def parse_historical_signal(
         int(match.group("number")): _matched_price(match)
         for match in TP_RE.finditer(text)
     }
-    if set(targets) != {1, 2, 3, 4}:
+    if not {1, 2, 3, 4}.issubset(targets):
         return None
 
     entry = _matched_price(entry_match)

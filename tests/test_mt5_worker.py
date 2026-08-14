@@ -286,14 +286,20 @@ class ClosePositionTests(unittest.TestCase):
 class SubprocessMainTests(unittest.TestCase):
     def test_mt5_worker_main_subprocess_execution(self):
         import json
+        import os
         import subprocess
         import sys
+        from pathlib import Path
+        src_dir = str(Path(__file__).resolve().parents[1] / "src")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = src_dir + os.pathsep + env.get("PYTHONPATH", "")
         proc = subprocess.Popen(
             [sys.executable, "-m", "aurum_bot.mt5_worker"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=env,
         )
         stdout, stderr = proc.communicate(input=json.dumps({}), timeout=10)
         self.assertEqual(proc.returncode, 0)

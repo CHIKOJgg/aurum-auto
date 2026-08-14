@@ -840,6 +840,7 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         )
         if execution_kind is ExecutionKind.MARKET and strategy.target_by_order_kind is not None:
             market_target, _ = strategy.target_by_order_kind
+            market_target = min(market_target, target_count)
             market_tp = _normalized(signal.take_profits[market_target - 1], digits)
             market_target_ahead = (
                 executable_price < market_tp

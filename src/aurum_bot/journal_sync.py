@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -27,6 +28,7 @@ def collect_trade_snapshots(
         capture_output=True,
         timeout=timeout,
         check=False,
+        env=os.environ.copy(),
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()

@@ -115,10 +115,10 @@ async def handle_message(
         state.mark(message_id, "ignored_not_entry_call")
         LOGGER.info("Message %s ignored: not an allowed entry call", message_id)
         return
-    if signal.take_profits is None:
+    if not signal.take_profits:
         state.mark(message_id, "ignored_missing_tp_levels", signal=signal.to_dict())
         LOGGER.warning(
-            "Signal %s ignored: exit strategy %s requires TP1-TP4",
+            "Signal %s ignored: it has no complete take-profit sequence",
             message_id,
             config.trading.exit_strategy,
         )

@@ -6,4 +6,5 @@ if (-not (Test-Path -LiteralPath $PythonExe)) {
     throw "Python environment not found. Follow README.md first."
 }
 
+$env:PYTHONPATH = (Join-Path $ProjectRoot "src") + [IO.Path]::PathSeparator + $env:PYTHONPATH
 & $PythonExe -m aurum_bot.main --config (Join-Path $ProjectRoot "config.yaml")

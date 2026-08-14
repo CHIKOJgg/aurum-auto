@@ -12,21 +12,23 @@ SIGNAL_SYMBOL_ALIASES: dict[str, str] = {
     "GERMANY40": "DE40",
     "USNDAQ100": "US100",
 }
-# Module-level defaults are kept for CLI tools and tests.
-# Live bot passes config-driven values via function parameters.
 FOREX_SYMBOL_RE = re.compile(r"^[A-Z]{6}$")
 
 HEADER_RE = re.compile(
     r"(?im)^\s*#(?P<symbol>[A-Z0-9._-]+)\s+(?P<direction>LONG|SHORT)\b"
 )
 ENTRY_RE = re.compile(
-    r"(?im)^\s*[*_🔸]?\s*Вход(?:\s+сейчас)?(?:\s+(?:или|:|@))?\s*(?P<price>\d+(?:[.,]\d+)?)"
+    r"(?im)^\s*[^\w\s]*\s*(?:\w+\s+)?Вход"
+    r"(?:\s+сейчас(?:\s+или)?)?\s*:?\s*"
+    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 SL_RE = re.compile(
-    r"(?im)^\s*[*_🛑]?\s*SL\s*[:\-=]?\s*(?P<price>\d+(?:[.,]\d+)?)"
+    r"(?im)^\s*[^\w\s]*\s*SL\s*:?\s*(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 TP_RE = re.compile(
-    r"(?im)^\s*(?:\S+\s*)?TP\s*(?P<number>[1-4])\s*[:\-=]?\s*(?P<price>\d+(?:[.,]\d+)?)"
+    r"(?im)^\s*[^\w\s]*\s*(?:TP\s*|Take\s+profit\s*)"
+    r"(?P<number>\d+)\s*:?\s*"
+    r"(?P<price>\d+(?:[.,]\d+)?)\s*$"
 )
 
 
@@ -70,18 +72,14 @@ def parse_signal(
     header = HEADER_RE.search(text)
     entry_match = ENTRY_RE.search(text)
     sl_match = SL_RE.search(text)
-    take_profits_raw = {
+    take_profits = {
         int(match.group("number")): _price(match) for match in TP_RE.finditer(text)
     }
-    if not all((header, entry_match, sl_match)) or not {1, 2, 3, 4}.issubset(take_profits_raw):
+    target_count = max(take_profits, default=0)
+    selected_target = target_count if target_count < 4 else take_profit_target
+    tp_match = take_profits.get(selected_target)
+    if not all((header, entry_match, sl_match, tp_match)):
         return None
-
-    tp1 = take_profits_raw[1]
-    tp2 = take_profits_raw.get(2, tp1)
-    tp3 = take_profits_raw.get(3, tp2)
-    tp4 = take_profits_raw.get(4, tp3)
-    take_profits_tuple = (float(tp1), float(tp2), float(tp3), float(tp4))
-    take_profit = take_profits_tuple[take_profit_target - 1]
 
     raw_symbol = header.group("symbol").upper()
     if not is_supported_symbol(raw_symbol, allowed_symbols, symbol_aliases):
@@ -91,19 +89,20 @@ def parse_signal(
     direction = Direction(header.group("direction").upper())
     entry = _price(entry_match)
     stop_loss = _price(sl_match)
+    take_profit = float(tp_match)
 
     if direction is Direction.LONG:
-        valid_geometry = (
-            stop_loss < entry < tp1
-            and tp1 <= tp2 <= tp3 <= tp4
-        )
+        valid_geometry = stop_loss < entry < take_profit
     else:
-        valid_geometry = (
-            tp1 < entry < stop_loss
-            and tp1 >= tp2 >= tp3 >= tp4
-        )
+        valid_geometry = take_profit < entry < stop_loss
     if not valid_geometry:
         return None
+
+    take_profits_tuple = (
+        tuple(float(take_profits[number]) for number in range(1, target_count + 1))
+        if all(number in take_profits for number in range(1, target_count + 1))
+        else None
+    )
 
     return Signal(
         message_id=message_id,
@@ -114,4 +113,3 @@ def parse_signal(
         take_profit=take_profit,
         take_profits=take_profits_tuple,
     )
-
