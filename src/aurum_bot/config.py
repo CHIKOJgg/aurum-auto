@@ -320,12 +320,12 @@ def load_config(config_path: str | Path) -> AppConfig:
         exit_spread_guard_enabled=_guard_bool("exit_spread_guard_enabled", True),
         close_opposite_positions=_guard_bool("close_opposite_positions", False),
     )
-    if not 0 < trading.risk_multiplier <= 100:
-        raise ValueError("trading.risk_multiplier must be > 0 and <= 100")
+    if not 0 < trading.risk_multiplier <= 10.0:
+        raise ValueError("trading.risk_multiplier must be > 0 and <= 10.0 (max 10% risk base per trade)")
     if trading.symbol_risk_multipliers and any(
-        not 0 < mult <= 100 for mult in trading.symbol_risk_multipliers.values()
+        not 0 < mult <= 10.0 for mult in trading.symbol_risk_multipliers.values()
     ):
-        raise ValueError("trading.symbol_risk_multipliers values must be > 0 and <= 100")
+        raise ValueError("trading.symbol_risk_multipliers values must be > 0 and <= 10.0 (max 10% risk base per trade)")
     if not 0 < trading.min_market_risk_multiplier <= trading.max_market_risk_multiplier:
         raise ValueError("trading market risk multipliers must be positive and ordered")
     if trading.lot_step != 0.01:

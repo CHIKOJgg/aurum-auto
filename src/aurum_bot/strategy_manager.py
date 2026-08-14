@@ -405,9 +405,11 @@ def _manage_plan(
         if current_positions and not stop_is_placeable and (stop_target >= 0 or missing_sl_tp):
             # The trigger and reversal happened between polls (or while the bot
             # was stopped). Do not leave the wider original risk in place.
-            if close_allowed() and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
+            # An unhedged position missing mandatory SL/TP must be closed immediately without spread deferral.
+            can_close = True if missing_sl_tp else close_allowed()
+            if can_close and all(_close_position(mt5, item, symbol_info, deviation) for item in current_positions):
                 plan["status"] = "completed"
-                plan["completion_reason"] = "managed_stop_crossed_before_modify"
+                plan["completion_reason"] = "missing_sl_emergency_close" if missing_sl_tp else "managed_stop_crossed_before_modify"
                 _save(path, plan)
                 return
         elif current_positions and all(_modify_position(mt5, item, stop=stop, take_profit=target_tp) for item in current_positions):

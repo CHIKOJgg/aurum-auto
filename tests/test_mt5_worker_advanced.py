@@ -229,3 +229,146 @@ def test_opposite_signals_logic_execution(mock_is_file, base_payload):
         if req["action"] == mt5.TRADE_ACTION_DEAL:
             assert req["type"] == mt5.ORDER_TYPE_BUY
         assert req["action"] != mt5.TRADE_ACTION_REMOVE
+
+
+@patch("aurum_bot.mt5_worker.Path.is_file")
+@patch.dict(sys.modules, {"MetaTrader5": MagicMock()})
+def test_market_entry_tolerance_disabled_forces_limit_order(mock_is_file, base_payload):
+    mock_is_file.return_value = True
+    import MetaTrader5 as mt5
+    _setup_mock_mt5(mt5)
+    
+    # Entry is 2000.0, SL is 1990.0 (risk distance = 10.0)
+    # Price is 2001.0 (loss at stop = 11.0 = 1.1R).
+    # Configure min_market_risk_multiplier = 0.95 and max_market_risk_multiplier = 1.05.
+    # At 1.1R, price is OUTSIDE min/max market risk range.
+    # With market_entry_tolerance_r = 0.2, tolerance would allow it (up to 1.2R).
+    # But since market_entry_tolerance_enabled = False, it MUST choose LIMIT order.
+    mt5.symbol_info_tick.return_value.ask = 2001.0
+    mt5.symbol_info_tick.return_value.bid = 2000.8
+    
+    base_payload["trading"]["min_market_risk_multiplier"] = 0.95
+    base_payload["trading"]["max_market_risk_multiplier"] = 1.05
+    base_payload["trading"]["market_entry_tolerance_r"] = 0.2
+    base_payload["trading"]["market_entry_tolerance_enabled"] = False
+    
+    # Setup realistic order_calc_profit to reflect the adverse price drift
+    def calc_profit(action, sym, vol, open_p, close_p):
+        return (close_p - open_p) * vol * 100.0 if action == 0 else (open_p - close_p) * vol * 100.0
+    mt5.order_calc_profit.side_effect = calc_profit
+    
+    mock_check = MagicMock()
+    mock_check.retcode = 0
+    mt5.order_check.return_value = mock_check
+    
+    mock_result = MagicMock()
+    mock_result.retcode = 10008  # TRADE_RETCODE_PLACED
+    mock_result.order = 7777
+    mt5.order_send.return_value = mock_result
+    
+    result = execute(base_payload)
+    
+    assert result.status == "executed"
+    assert result.execution_kind == "limit"
+    
+    calls = mt5.order_send.call_args_list
+    assert len(calls) >= 1
+    req = calls[0][0][0]
+    assert req["action"] == mt5.TRADE_ACTION_PENDING
+
+
+@patch("aurum_bot.mt5_worker.Path.is_file")
+@patch.dict(sys.modules, {"MetaTrader5": MagicMock()})
+def test_emergency_position_close_on_sltp_failure(mock_is_file, base_payload):
+    mock_is_file.return_value = True
+    import MetaTrader5 as mt5
+    _setup_mock_mt5(mt5)
+    
+    mt5.symbol_info_tick.return_value.ask = 2000.0
+    mt5.symbol_info_tick.return_value.bid = 1999.8
+    
+    mock_check = MagicMock()
+    mock_check.retcode = 0
+    mt5.order_check.return_value = mock_check
+    
+    # 1. Market order succeeds
+    deal_result = MagicMock()
+    deal_result.retcode = 10009
+    deal_result.order = 8888
+    
+    # 2. SLTP order fails
+    sltp_fail = MagicMock()
+    sltp_fail.retcode = 10016 # TRADE_RETCODE_INVALID_STOPS
+    
+    # 3. Emergency close succeeds
+    close_success = MagicMock()
+    close_success.retcode = 10009
+    
+    mt5.order_send.side_effect = [deal_result, sltp_fail, sltp_fail, sltp_fail, close_success]
+    
+    mock_position = MagicMock()
+    mock_position.ticket = 8888
+    mock_position.magic = 1001
+    mock_position.sl = 0.0
+    mock_position.tp = 0.0
+    mock_position.type = mt5.ORDER_TYPE_BUY
+    mock_position.volume = 0.01
+    mock_position.symbol = "XAUUSD"
+    
+    # Return empty positions before deal, position after deal
+    def positions_get_side_effect(*args, **kwargs):
+        if kwargs.get("ticket") == 8888:
+            return (mock_position,)
+        return ()
+    mt5.positions_get.side_effect = positions_get_side_effect
+    
+    result = execute(base_payload)
+    
+    assert result.status == "failed"
+    assert "emergency position close" in result.detail
+
+
+@patch("aurum_bot.mt5_worker.Path.is_file")
+@patch.dict(sys.modules, {"MetaTrader5": MagicMock()})
+def test_emergency_position_close_failure_alert(mock_is_file, base_payload):
+    mock_is_file.return_value = True
+    import MetaTrader5 as mt5
+    _setup_mock_mt5(mt5)
+    
+    mt5.symbol_info_tick.return_value.ask = 2000.0
+    mt5.symbol_info_tick.return_value.bid = 1999.8
+    
+    mock_check = MagicMock()
+    mock_check.retcode = 0
+    mt5.order_check.return_value = mock_check
+    
+    # Market order succeeds, then SLTP fails, then emergency close fails
+    deal_result = MagicMock()
+    deal_result.retcode = 10009
+    deal_result.order = 8888
+    
+    fail_result = MagicMock()
+    fail_result.retcode = 10016
+    
+    mt5.order_send.side_effect = [deal_result] + [fail_result] * 10
+    
+    mock_position = MagicMock()
+    mock_position.ticket = 8888
+    mock_position.magic = 1001
+    mock_position.sl = 0.0
+    mock_position.tp = 0.0
+    mock_position.type = mt5.ORDER_TYPE_BUY
+    mock_position.volume = 0.01
+    mock_position.symbol = "XAUUSD"
+    
+    def positions_get_side_effect(*args, **kwargs):
+        if kwargs.get("ticket") == 8888:
+            return (mock_position,)
+        return ()
+    mt5.positions_get.side_effect = positions_get_side_effect
+    
+    result = execute(base_payload)
+    
+    assert result.status == "failed"
+    assert "CRITICAL: emergency position close FAILED" in result.detail
+

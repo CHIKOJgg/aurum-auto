@@ -347,3 +347,53 @@ def test_entry_time_msc_server_offset_conversion(mt5_mock, plan_path, strategy_p
     # entry_time_msc should be converted to UTC epoch (server_time_msc - 3 hours)
     expected_utc = server_time_msc - int(3.0 * 3600_000)
     assert abs(updated_plan["entry_time_msc"] - expected_utc) < 1000
+
+
+def test_missing_sl_bypasses_spread_guard_deferral(mt5_mock, plan_path, strategy_patch):
+    """Verify that when a position is missing SL and cannot be placed, emergency closure happens immediately even if spread exceeds limits."""
+    create_plan(plan_path, active_stop_target=-1)
+    position = SimpleNamespace(
+        ticket=1,
+        magic=12345,
+        comment="AURUM:test",
+        symbol="GOLD",
+        type=mt5_mock.POSITION_TYPE_BUY,
+        volume=1.0,
+        price_open=100.0,
+        sl=0.0,  # Missing SL!
+        tp=130.0,
+    )
+    mt5_mock.positions_get.return_value = (position,)
+    mt5_mock.orders_get.return_value = ()
+
+    # Price is right at stop_loss (90.0), so stop is not placeable
+    mt5_mock.symbol_info_tick.return_value = SimpleNamespace(
+        bid=90.0,
+        ask=95.0,  # Wide spread (5.0 vs max 0.5)
+        time=int(time.time()),
+    )
+    mt5_mock.symbol_info.return_value = SimpleNamespace(
+        volume_step=0.01,
+        volume_min=0.01,
+        digits=2,
+        point=0.01,
+        trade_stops_level=10,
+        filling_mode=1,
+        trade_exemode=1,
+    )
+
+    with patch("aurum_bot.strategy_manager._favorable_extreme", return_value=100.0):
+        _manage_plan(
+            mt5=mt5_mock,
+            path=plan_path,
+            plan=json.loads(plan_path.read_text()),
+            deviation=10,
+            max_spread_points=50,  # 0.50 max spread
+            exit_spread_guard_enabled=True,
+            close_spread_hard_cap_minutes=10.0,
+        )
+
+    updated_plan = json.loads(plan_path.read_text())
+    # The plan should be completed immediately due to missing SL emergency close
+    assert updated_plan["status"] == "completed"
+    assert updated_plan["completion_reason"] == "missing_sl_emergency_close"

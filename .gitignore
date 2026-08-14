@@ -3,6 +3,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 .codex-remote-attachments/
 .env
 config.yaml

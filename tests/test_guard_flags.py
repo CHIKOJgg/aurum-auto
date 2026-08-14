@@ -89,6 +89,12 @@ class ConfigGuardFlagsTests(unittest.TestCase):
         self.assertEqual(config.trading.get_risk_multiplier("GBPUSD"), 2.0)
         self.assertEqual(config.trading.get_risk_multiplier("XAUUSD"), 3.0)
 
+    def test_risk_multiplier_exceeding_ten_raises(self):
+        with self.assertRaises(ValueError):
+            self._load(lambda data: data["trading"].update(risk_multiplier=10.5))
+        with self.assertRaises(ValueError):
+            self._load(lambda data: data["trading"].update(symbol_risk_multipliers={"XAUUSD": 12.0}))
+
     def test_server_time_mode_defaults_to_auto(self):
         config = self._load()
         self.assertEqual(config.trading.server_time_mode, "auto")

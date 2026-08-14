@@ -816,12 +816,14 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
             and abs(float(current_loss)) <= max_market_loss + 1e-9
             and valid_market_geometry
         )
-        market_entry_tolerance_r = float(
-            trading.get("market_entry_tolerance_r", 0.0)
+        tolerance_enabled = bool(trading.get("market_entry_tolerance_enabled", True))
+        market_entry_tolerance_r = (
+            float(trading.get("market_entry_tolerance_r", 0.0))
+            if tolerance_enabled
+            else 0.0
         )
         price_within_tolerance = (
-            bool(trading.get("market_entry_tolerance_enabled", True))
-            and market_entry_tolerance_r > 0
+            market_entry_tolerance_r > 0
             and abs(executable_price - entry)
             <= market_entry_tolerance_r * abs(entry - stop_loss) + 1e-9
             and valid_market_geometry
@@ -1099,17 +1101,34 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
         if ticket is not None and execution_kind is ExecutionKind.MARKET:
             # Ensure SL and TP are applied on broker server (for Market Execution accounts that strip SL/TP on deal entry)
             pos_ticket = ticket
-            if hasattr(mt5, "history_deals_get"):
-                try:
-                    deals = mt5.history_deals_get(order=ticket)
-                    if deals and isinstance(deals, (list, tuple)):
-                        pos_ticket = int(getattr(deals[0], "position_id", ticket) or ticket)
-                except Exception:
-                    pass
-            matching_positions = tuple(mt5.positions_get(ticket=pos_ticket) or ())
+            matching_positions = ()
+            for _lookup_attempt in range(5):
+                if hasattr(mt5, "history_deals_get"):
+                    try:
+                        deals = mt5.history_deals_get(order=ticket)
+                        if deals and isinstance(deals, (list, tuple)):
+                            pos_ticket = int(getattr(deals[0], "position_id", ticket) or ticket)
+                    except Exception:
+                        pass
+                matching_positions = tuple(mt5.positions_get(ticket=pos_ticket) or ())
+                if not matching_positions:
+                    matching_positions = tuple(mt5.positions_get(symbol=broker_symbol) or ())
+                
+                # Check if we have a matching position
+                found_match = False
+                for pos in matching_positions:
+                    current_pos_ticket = int(pos.ticket)
+                    is_exact_match = (current_pos_ticket == pos_ticket or current_pos_ticket == ticket)
+                    if not is_exact_match and int(getattr(pos, "magic", -1)) == magic:
+                        ic = str(getattr(pos, "comment", ""))
+                        is_exact_match = bool(re.search(rf"{re.escape(comment)}(?!\d)", ic))
+                    if is_exact_match:
+                        found_match = True
+                        break
+                if found_match:
+                    break
+                time.sleep(0.1)
 
-            if not matching_positions:
-                matching_positions = tuple(mt5.positions_get(symbol=broker_symbol) or ())
             for pos in matching_positions:
                 current_pos_ticket = int(pos.ticket)
                 # Only match the exact position ticket, or fallback to exact comment match for this signal
@@ -1136,14 +1155,28 @@ def execute(payload: dict[str, Any]) -> ExecutionResult:
                             break
                         time.sleep(0.1)
                     if not sltp_ok:
-                        _close_position(mt5, pos, symbol_info, int(trading["deviation_points"]))
-                        return ExecutionResult(
-                            account.name,
-                            "failed",
-                            f"emergency position close: could not attach mandatory SL ({stop_loss})",
-                            volume=volume,
-                            execution_kind=execution_kind.value,
-                        )
+                        closed = False
+                        for _close_retry in range(3):
+                            if _close_position(mt5, pos, symbol_info, int(trading["deviation_points"])):
+                                closed = True
+                                break
+                            time.sleep(0.2)
+                        if closed:
+                            return ExecutionResult(
+                                account.name,
+                                "failed",
+                                f"emergency position close: could not attach mandatory SL ({stop_loss})",
+                                volume=volume,
+                                execution_kind=execution_kind.value,
+                            )
+                        else:
+                            return ExecutionResult(
+                                account.name,
+                                "failed",
+                                f"CRITICAL: emergency position close FAILED after SL attachment failure: position {current_pos_ticket} remains unprotected without SL ({stop_loss})",
+                                volume=volume,
+                                execution_kind=execution_kind.value,
+                            )
 
         plan = _build_strategy_plan(
             signal=signal,
