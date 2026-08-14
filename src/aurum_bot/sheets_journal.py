@@ -331,7 +331,7 @@ class SheetsTradeJournal:
         ]
         self._batch_write(
             [
-                self._range_for_sheet(TRADE_SHEET, 1, "A:V", list(TRADE_HEADERS)),
+                self._range_for_sheet(TRADE_SHEET, 1, "A:W", list(TRADE_HEADERS)),
                 self._range_for_sheet(WEEK_SHEET, 1, "A:M", list(WEEK_HEADERS)),
                 *settings_data,
                 *self._trade_formula_updates(2),

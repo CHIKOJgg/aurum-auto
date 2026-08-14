@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -329,20 +330,19 @@ def _already_applied(
     comment: str,
     execution_kind: ExecutionKind,
 ) -> int | None:
-    if execution_kind is ExecutionKind.MARKET:
-        positions = mt5.positions_get(symbol=symbol) or ()
-        for position in positions:
-            if int(position.magic) == magic:
-                ic = str(position.comment)
-                if re.search(rf"{re.escape(comment)}(?!\d)", ic):
-                    return int(position.ticket)
-        return None
+    positions = mt5.positions_get(symbol=symbol) or ()
+    for position in positions:
+        if int(getattr(position, "magic", -1)) == magic:
+            ic = str(getattr(position, "comment", ""))
+            if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                return int(position.ticket)
 
     orders = mt5.orders_get(symbol=symbol) or ()
     for order in orders:
-        ic = str(order.comment)
-        if int(order.magic) == magic and re.search(rf"{re.escape(comment)}(?!\d)", ic):
-            return int(order.ticket)
+        if int(getattr(order, "magic", -1)) == magic:
+            ic = str(getattr(order, "comment", ""))
+            if re.search(rf"{re.escape(comment)}(?!\d)", ic):
+                return int(order.ticket)
     return None
 
 

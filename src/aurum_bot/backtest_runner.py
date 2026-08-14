@@ -112,15 +112,16 @@ def _enrich_financials(
             commission_one_lot = trading.default_commission_per_lot_usd
             record.commission_source = "default_config_usd_per_lot"
         record.commission_per_lot_usd = commission_one_lot
+        symbol_risk = trading.get_risk_multiplier(signal.symbol) * 1.0
         raw_lot = raw_volume_for_risk(
             account.risk_base_usd,
-            trading.risk_percent,
+            symbol_risk,
             abs(loss_one_lot),
             commission_one_lot,
         )
         rounded_lot = volume_for_risk(
             account.risk_base_usd,
-            trading.risk_percent,
+            symbol_risk,
             abs(loss_one_lot),
             metadata.volume_min,
             metadata.volume_max,

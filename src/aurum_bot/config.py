@@ -322,6 +322,10 @@ def load_config(config_path: str | Path) -> AppConfig:
     )
     if not 0 < trading.risk_multiplier <= 100:
         raise ValueError("trading.risk_multiplier must be > 0 and <= 100")
+    if trading.symbol_risk_multipliers and any(
+        not 0 < mult <= 100 for mult in trading.symbol_risk_multipliers.values()
+    ):
+        raise ValueError("trading.symbol_risk_multipliers values must be > 0 and <= 100")
     if not 0 < trading.min_market_risk_multiplier <= trading.max_market_risk_multiplier:
         raise ValueError("trading market risk multipliers must be positive and ordered")
     if trading.lot_step != 0.01:
@@ -393,7 +397,7 @@ def load_config(config_path: str | Path) -> AppConfig:
         accounts.append(
             AccountConfig(
                 name=name,
-                enabled=bool(account_raw.get("enabled", False)),
+                enabled=_bool(account_raw, "enabled", f"accounts[{index}]") if "enabled" in account_raw else False,
                 risk_base_usd=risk_base,
                 terminal_path=str(account_raw["terminal_path"]),
                 symbols=symbols,

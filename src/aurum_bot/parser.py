@@ -94,12 +94,12 @@ def parse_signal(
 
     if direction is Direction.LONG:
         valid_geometry = (
-            stop_loss < entry < take_profit
+            stop_loss < entry < tp1
             and tp1 <= tp2 <= tp3 <= tp4
         )
     else:
         valid_geometry = (
-            take_profit < entry < stop_loss
+            tp1 < entry < stop_loss
             and tp1 >= tp2 >= tp3 >= tp4
         )
     if not valid_geometry:

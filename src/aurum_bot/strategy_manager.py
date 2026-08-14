@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -36,7 +37,6 @@ def _matching(items: tuple[Any, ...] | list[Any], plan: dict[str, Any]) -> list[
         if item_ticket == order_ticket or item_ticket in saved_tickets:
             results.append(item)
         elif item_magic == magic:
-            import re
             if re.search(rf"{re.escape(comment)}(?!\d)", item_comment):
                 results.append(item)
     return results

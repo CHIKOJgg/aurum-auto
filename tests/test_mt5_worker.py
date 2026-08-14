@@ -283,5 +283,24 @@ class ClosePositionTests(unittest.TestCase):
         self.assertEqual(mt5.requests[0]["comment"], "AURUM:emergency_close")
 
 
+class SubprocessMainTests(unittest.TestCase):
+    def test_mt5_worker_main_subprocess_execution(self):
+        import json
+        import subprocess
+        import sys
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "aurum_bot.mt5_worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = proc.communicate(input=json.dumps({}), timeout=10)
+        self.assertEqual(proc.returncode, 0)
+        output = json.loads(stdout.strip())
+        self.assertNotEqual(output.get("detail"), "NameError: name 'sys' is not defined")
+        self.assertIn("account", output)
+
+
 if __name__ == "__main__":
     unittest.main()
